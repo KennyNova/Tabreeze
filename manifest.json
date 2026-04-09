@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "New Tab Dashboard",
+  "version": "1.0.0",
+  "description": "A beautiful productivity dashboard for your new tab page with bookmarks, tasks, calendar, and weather.",
+  "permissions": ["bookmarks", "storage", "identity"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "chrome_url_overrides": {
+    "newtab": "index.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "oauth2": {
+    "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/calendar.readonly",
+      "https://www.googleapis.com/auth/tasks.readonly"
+    ]
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self';"
+  }
+}
