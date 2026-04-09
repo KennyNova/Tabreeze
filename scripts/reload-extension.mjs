@@ -5,12 +5,12 @@
  *
  * Env:
  *   CDP_PORT          - default 9222
- *   EXT_MANIFEST_NAME - must match manifest.json "name" (default: Tabriz)
+ *   EXT_MANIFEST_NAME - must match manifest.json "name" (default: Tabreeze)
  */
 import puppeteer from "puppeteer-core";
 
 const port = process.env.CDP_PORT || "9222";
-const manifestName = process.env.EXT_MANIFEST_NAME || "Tabriz";
+const manifestName = process.env.EXT_MANIFEST_NAME || "Tabreeze";
 
 async function reloadExtension() {
   let browser;

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import { createPortal } from "react-dom";
 import Greeting from "./Greeting";
 import SearchBar from "./SearchBar";
 import BookmarksGrid from "./BookmarksGrid";
@@ -27,7 +28,17 @@ import {
   remapLayoutToGridCols,
   resolveCollisions,
 } from "../layout/tileGeometry";
-import type { AiProvider, AnimationStyle, GridSpec, LayoutConfigV2, ReactivePreset, TileItem, WidgetConstraintsMap, WidgetType } from "../layout/types";
+import type { AnimationStyle, GridSpec, LayoutConfigV2, ReactivePreset, TileItem, WidgetConstraintsMap, WidgetType } from "../layout/types";
+import {
+  MAX_CUSTOM_SEARCH_SOURCES,
+  createCustomSearchSource,
+  getAvailableSearchSources,
+  isValidSourceTemplate,
+  loadCustomSearchSources,
+  saveCustomSearchSources,
+} from "../search/sources";
+import type { SearchSource } from "../search/sources";
+import SearchSourceLogo from "../search/SearchSourceLogo";
 
 interface WidgetDefinition {
   label: string;
@@ -100,7 +111,7 @@ const widgetDefinitions: Record<WidgetType, WidgetDefinition> = {
     maxRowSpan: 2,
     render: (tile) => (
       <div className="h-full flex items-center justify-center px-2">
-        <SearchBar provider={tile.settings?.searchProvider ?? "chatgpt"} />
+        <SearchBar sourceId={tile.settings?.searchSourceId ?? tile.settings?.searchProvider ?? "chatgpt"} />
       </div>
     ),
   },
@@ -149,9 +160,9 @@ const widgetDefinitions: Record<WidgetType, WidgetDefinition> = {
     defaultColSpan: 4,
     defaultRowSpan: 1,
     minColSpan: 2,
-    maxColSpan: 6,
+    maxColSpan: 12,
     minRowSpan: 1,
-    maxRowSpan: 4,
+    maxRowSpan: 5,
     render: (tile) => (
       <div className="h-full w-full flex items-stretch">
         <WeatherWidget rowSpan={tile.rowSpan} colSpan={tile.colSpan} />
@@ -178,14 +189,14 @@ function buildWidgetConstraints(): WidgetConstraintsMap {
 
 const widgetConstraints = buildWidgetConstraints();
 const BREAKPOINT_ACCENTS = ["#ec4899", "#8b5cf6", "#3b82f6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444"];
-const SEARCH_PROVIDERS: AiProvider[] = ["chatgpt", "claude"];
-const SEARCH_PROVIDER_LABELS: Record<AiProvider, string> = {
-  chatgpt: "ChatGPT",
-  claude: "Claude",
-};
 
 function cloneConfig(c: LayoutConfigV2): LayoutConfigV2 {
   return JSON.parse(JSON.stringify(c)) as LayoutConfigV2;
+}
+
+function getSearchSourceId(tile: TileItem): string {
+  if (tile.type !== "search") return "chatgpt";
+  return tile.settings?.searchSourceId ?? tile.settings?.searchProvider ?? "chatgpt";
 }
 
 function renderWidgetIcon(type: WidgetType): ReactNode {
@@ -436,6 +447,16 @@ export default function TileLayout() {
   const [viewport, setViewport] = useState({ w: typeof window !== "undefined" ? window.innerWidth : 1200, h: typeof window !== "undefined" ? window.innerHeight : 800 });
   const [resizing, setResizing] = useState<ResizeState | null>(null);
   const [dragging, setDragging] = useState<DragState | null>(null);
+  const [customSearchSources, setCustomSearchSources] = useState<SearchSource[]>(() => loadCustomSearchSources());
+  const [openSearchSourceMenuTileId, setOpenSearchSourceMenuTileId] = useState<string | null>(null);
+  const availableSearchSources = useMemo(
+    () => getAvailableSearchSources(customSearchSources),
+    [customSearchSources]
+  );
+
+  useEffect(() => {
+    saveCustomSearchSources(customSearchSources);
+  }, [customSearchSources]);
 
   const editModeRef = useRef(editMode);
   const viewportRef = useRef(viewport);
@@ -455,6 +476,30 @@ export default function TileLayout() {
   useEffect(() => {
     if (!editMode) setShowLayoutSettingsModal(false);
   }, [editMode]);
+
+  useEffect(() => {
+    if (!editMode) setOpenSearchSourceMenuTileId(null);
+  }, [editMode]);
+
+  useEffect(() => {
+    if (!openSearchSourceMenuTileId) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const container = searchSourceMenuRefs.current.get(openSearchSourceMenuTileId);
+      if (!container) return;
+      if (!container.contains(event.target as Node)) {
+        setOpenSearchSourceMenuTileId(null);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpenSearchSourceMenuTileId(null);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [openSearchSourceMenuTileId]);
 
   useEffect(() => {
     if (!showLayoutSettingsModal) return;
@@ -534,6 +579,8 @@ export default function TileLayout() {
 
   const gridRef = useRef<HTMLDivElement>(null);
   const tileRefs = useRef(new Map<string, HTMLDivElement>());
+  const searchSourceMenuRefs = useRef(new Map<string, HTMLDivElement>());
+  const previousTileRectsRef = useRef(new Map<string, DOMRect>());
   const draggingRef = useRef<DragState | null>(null);
   const dragAnimationRef = useRef<number | null>(null);
   const layoutRef = useRef<TileItem[]>(layoutForView);
@@ -677,8 +724,8 @@ export default function TileLayout() {
     () =>
       ({
         none: { tileMs: 0, easing: "linear", dragMs: 0 },
-        subtle: { tileMs: 160, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)", dragMs: 45 },
-        smooth: { tileMs: 300, easing: "cubic-bezier(0.22, 1, 0.36, 1)", dragMs: 60 },
+        subtle: { tileMs: 160, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)", dragMs: 60 },
+        smooth: { tileMs: 420, easing: "cubic-bezier(0.22, 1, 0.36, 1)", dragMs: 60 },
       } satisfies Record<AnimationStyle, { tileMs: number; easing: string; dragMs: number }>)[
         layoutConfig.reactive.animationStyle
       ],
@@ -694,6 +741,37 @@ export default function TileLayout() {
     );
     return resolveCollisions(moved, dragging.id, activeGridCols);
   }, [dragging, layoutForView, activeGridCols]);
+
+  useLayoutEffect(() => {
+    const nextRects = new Map<string, DOMRect>();
+    const shouldAnimate = !editMode && !dragging && !resizing && animationTuning.tileMs > 0;
+
+    tileRefs.current.forEach((el, id) => {
+      const newRect = el.getBoundingClientRect();
+      nextRects.set(id, newRect);
+      if (!shouldAnimate) return;
+      const oldRect = previousTileRectsRef.current.get(id);
+      if (!oldRect) return;
+
+      const dx = oldRect.left - newRect.left;
+      const dy = oldRect.top - newRect.top;
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+
+      el.animate(
+        [
+          { transform: `translate(${dx}px, ${dy}px)` },
+          { transform: "translate(0px, 0px)" },
+        ],
+        {
+          duration: animationTuning.tileMs,
+          easing: animationTuning.easing,
+          fill: "both",
+        }
+      );
+    });
+
+    previousTileRectsRef.current = nextRects;
+  }, [displayedLayout, activeGridCols, animationTuning.easing, animationTuning.tileMs, editMode, dragging, resizing]);
 
   const gridGuideRows = useMemo(() => {
     const maxEnd = displayedLayout.reduce((acc, tile) => Math.max(acc, tile.rowStart + tile.rowSpan - 1), 1);
@@ -744,27 +822,50 @@ export default function TileLayout() {
     });
   };
 
-  const getSearchProvider = (tile: TileItem): AiProvider => {
-    if (tile.type !== "search") return "chatgpt";
-    return tile.settings?.searchProvider ?? "chatgpt";
+  const updateSearchSourceForTile = (id: string, sourceId: string) => {
+    setTiles((prev) =>
+      prev.map((tile) =>
+        tile.id === id && tile.type === "search"
+          ? {
+              ...tile,
+              settings: {
+                ...(tile.settings ?? {}),
+                searchSourceId: sourceId,
+              },
+            }
+          : tile
+      )
+    );
   };
 
-  const cycleSearchProvider = (id: string) => {
-    setTiles((prev) =>
-      prev.map((tile) => {
-        if (tile.id !== id || tile.type !== "search") return tile;
-        const currentProvider = getSearchProvider(tile);
-        const currentIndex = SEARCH_PROVIDERS.indexOf(currentProvider);
-        const nextProvider = SEARCH_PROVIDERS[(currentIndex + 1) % SEARCH_PROVIDERS.length];
-        return {
-          ...tile,
-          settings: {
-            ...(tile.settings ?? {}),
-            searchProvider: nextProvider,
-          },
-        };
-      })
+  const getSearchSourceLabel = (tile: TileItem): string => {
+    const sourceId = getSearchSourceId(tile);
+    const matched = availableSearchSources.find((source) => source.id === sourceId);
+    return matched?.label ?? "Google";
+  };
+
+  const addCustomSearchSourceForTile = (tile: TileItem) => {
+    if (tile.type !== "search") return;
+    if (customSearchSources.length >= MAX_CUSTOM_SEARCH_SOURCES) {
+      window.alert(`You can add up to ${MAX_CUSTOM_SEARCH_SOURCES} custom sources.`);
+      return;
+    }
+
+    const label = window.prompt("Source name (example: Gemini, Brave Search):", "");
+    if (!label || !label.trim()) return;
+    const template = window.prompt(
+      "Search URL template (use {query} or %s placeholder):",
+      "https://example.com/search?q={query}"
     );
+    if (!template || !template.trim()) return;
+    if (!isValidSourceTemplate(template)) {
+      window.alert("Invalid URL template. Use a valid http/https URL.");
+      return;
+    }
+
+    const nextSource = createCustomSearchSource(label, template);
+    setCustomSearchSources((prev) => [...prev, nextSource].slice(0, MAX_CUSTOM_SEARCH_SOURCES));
+    updateSearchSourceForTile(tile.id, nextSource.id);
   };
 
   const startDrag = (event: ReactPointerEvent<HTMLButtonElement>, tile: TileItem) => {
@@ -1051,7 +1152,7 @@ export default function TileLayout() {
         </div>
       </div>
 
-      {showLayoutSettingsModal && editMode && (
+      {showLayoutSettingsModal && editMode && typeof document !== "undefined" && createPortal(
         <div className="fixed inset-0 z-[150] flex items-start justify-center p-4 sm:p-6 overflow-y-auto">
           <button
             type="button"
@@ -1203,7 +1304,8 @@ export default function TileLayout() {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {layoutConfig.mode === "customBreakpoints" && activeDataProfile && !editMode && (
@@ -1269,16 +1371,97 @@ export default function TileLayout() {
                       <EditButton title="Move down" icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>} onClick={() => moveTile(tile.id, 1)} />
                       <EditButton title="Duplicate tile" icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h9a2 2 0 012 2v9m-3 3H7a2 2 0 01-2-2V10a2 2 0 012-2z" /></svg>} onClick={() => duplicateTile(tile)} />
                       {tile.type === "search" && (
-                        <button
-                          type="button"
-                          onClick={() => cycleSearchProvider(tile.id)}
-                          className="h-7 rounded-lg px-2.5 text-[10px] font-semibold tracking-wide uppercase
-                                     bg-cyan-500/12 text-cyan-700 dark:text-cyan-200
-                                     border border-cyan-500/25 hover:bg-cyan-500/20 transition-colors"
-                          title="Switch AI source for this search widget"
+                        <div
+                          ref={(node) => {
+                            if (node) searchSourceMenuRefs.current.set(tile.id, node);
+                            else searchSourceMenuRefs.current.delete(tile.id);
+                          }}
+                          className="relative inline-flex items-center gap-1.5 h-7 rounded-xl px-1.5
+                                     border border-black/10 dark:border-white/[0.14]
+                                     bg-white/70 dark:bg-white/[0.08]"
                         >
-                          Source: {SEARCH_PROVIDER_LABELS[getSearchProvider(tile)]}
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setOpenSearchSourceMenuTileId((prev) => (prev === tile.id ? null : tile.id))
+                            }
+                            className="h-5 min-w-[130px] inline-flex items-center justify-between gap-2 rounded-lg px-2
+                                       text-[10px] font-medium text-gray-700 dark:text-white/80
+                                       bg-transparent hover:bg-black/[0.04] dark:hover:bg-white/[0.08]
+                                       transition-colors"
+                            title="Search source for this widget"
+                            aria-haspopup="menu"
+                            aria-expanded={openSearchSourceMenuTileId === tile.id}
+                          >
+                            <span className="inline-flex items-center gap-1.5 min-w-0">
+                              <SearchSourceLogo
+                                sourceId={getSearchSourceId(tile)}
+                                className="w-3.5 h-3.5 object-contain shrink-0"
+                              />
+                              <span className="truncate">{getSearchSourceLabel(tile)}</span>
+                            </span>
+                            <svg
+                              className={`w-3 h-3 text-gray-500/80 dark:text-white/60 transition-transform duration-200 ${
+                                openSearchSourceMenuTileId === tile.id ? "rotate-180" : ""
+                              }`}
+                              viewBox="0 0 20 20"
+                              fill="currentColor"
+                              aria-hidden
+                            >
+                              <path d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" />
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => addCustomSearchSourceForTile(tile)}
+                            className="w-5 h-5 rounded-md flex items-center justify-center
+                                       bg-cyan-500/12 text-cyan-700 dark:text-cyan-200
+                                       border border-cyan-500/25 hover:bg-cyan-500/20 transition-colors"
+                            title={`Add custom source (max ${MAX_CUSTOM_SEARCH_SOURCES})`}
+                            aria-label="Add custom search source"
+                          >
+                            +
+                          </button>
+                          {openSearchSourceMenuTileId === tile.id && (
+                            <div
+                              role="menu"
+                              className="absolute left-0 top-[calc(100%+0.35rem)] z-50 min-w-[180px] max-h-56 overflow-y-auto
+                                         rounded-xl border border-black/10 dark:border-white/[0.14]
+                                         bg-white/95 dark:bg-[#1c1c1e]/95 backdrop-blur-md shadow-xl
+                                         animate-in"
+                            >
+                              {availableSearchSources.map((source) => {
+                                const selected = source.id === getSearchSourceId(tile);
+                                return (
+                                  <button
+                                    key={source.id}
+                                    type="button"
+                                    role="menuitemradio"
+                                    aria-checked={selected}
+                                    onClick={() => {
+                                      updateSearchSourceForTile(tile.id, source.id);
+                                      setOpenSearchSourceMenuTileId(null);
+                                    }}
+                                    className={`w-full text-left px-3 py-2 text-[11px] transition-colors
+                                                ${
+                                                  selected
+                                                    ? "bg-cyan-500/16 text-cyan-800 dark:text-cyan-200"
+                                                    : "text-gray-700 dark:text-white/80 hover:bg-black/[0.05] dark:hover:bg-white/[0.08]"
+                                                }`}
+                                  >
+                                    <span className="inline-flex items-center gap-2">
+                                      <SearchSourceLogo
+                                        sourceId={source.id}
+                                        className="w-3.5 h-3.5 object-contain shrink-0"
+                                      />
+                                      <span>{source.label}</span>
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
                       )}
                       <EditButton title="Remove tile" icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>} onClick={() => removeTile(tile.id)} disabled={layoutSlice.length <= 1} />
                       <div className="ml-auto text-[10px] text-gray-500/70 dark:text-white/45">{colSpan}x{rowSpan}</div>

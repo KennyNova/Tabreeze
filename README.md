@@ -1,11 +1,13 @@
-# Tabriz
+# Tabreeze
 
-Tabriz is a customizable new-tab dashboard extension for Chromium-based browsers. It focuses on a clean layout and daily-use widgets such as bookmarks, tasks, calendar, weather, and quick search.
+Tabreeze is a customizable new-tab dashboard extension for Chromium-based browsers. It focuses on a clean layout and daily-use widgets such as bookmarks, tasks, calendar, weather, and quick search.
+
+The name **Tabreeze** is a play on words combining **Tabriz**, **breeze**, and **tab**.
 
 ## Features
 
 - Clock and greeting
-- Search launcher
+- Search launcher (per-widget source dropdown + custom source add button, up to 5 custom sources)
 - Speed-dial style bookmarks
 - Tasks widget with drag-and-drop ordering
 - Calendar widget (Google + Outlook)
@@ -69,7 +71,7 @@ When build output changes, the reload script attempts to refresh the installed e
 
 - Default debugging port: `9222`
 - Override port with `CDP_PORT`
-- Override extension display name match with `EXT_MANIFEST_NAME` (default: `Tabriz`)
+- Override extension display name match with `EXT_MANIFEST_NAME` (default: `Tabreeze`)
 
 Manual reload command:
 

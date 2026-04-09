@@ -19,7 +19,7 @@ export const MAX_VIEWPORT_DIM = 16000;
 
 export const defaultTileLayout: TileItem[] = [
   { id: "tile-greeting-1", type: "greeting", colStart: 1, rowStart: 1, colSpan: 12, rowSpan: 2 },
-  { id: "tile-search-1", type: "search", colStart: 1, rowStart: 3, colSpan: 12, rowSpan: 1, settings: { searchProvider: "chatgpt" } },
+  { id: "tile-search-1", type: "search", colStart: 1, rowStart: 3, colSpan: 12, rowSpan: 1, settings: { searchSourceId: "chatgpt" } },
   { id: "tile-bookmarks-1", type: "bookmarks", colStart: 1, rowStart: 4, colSpan: 12, rowSpan: 2 },
   { id: "tile-weather-1", type: "weather", colStart: 1, rowStart: 6, colSpan: 4, rowSpan: 1 },
   { id: "tile-quotes-1", type: "quotes", colStart: 5, rowStart: 6, colSpan: 8, rowSpan: 2 },

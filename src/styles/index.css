@@ -223,4 +223,51 @@
     background: rgba(255, 255, 255, 0.8);
     animation: snowFall 3.2s linear infinite;
   }
+
+  .forecast-day-card {
+    animation: forecastSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .forecast-temp-bar {
+    background: linear-gradient(to right, rgba(96, 165, 250, 0.65), rgba(251, 146, 60, 0.65));
+    animation: tempBarGrow 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .weather-forecast-icon {
+    display: inline-block;
+    animation: forecastIconPop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+}
+
+@keyframes forecastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes tempBarGrow {
+  from {
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+  to {
+    transform: scaleX(1);
+    transform-origin: left;
+  }
+}
+
+@keyframes forecastIconPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }

@@ -15,6 +15,12 @@ import {
 
 function formatDay(dateStr: string, index: number): string {
   if (index === 0) return "Today";
+  if (index === 1) return "Tmrw";
+  return new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", { weekday: "short" });
+}
+
+function formatDayLong(dateStr: string, index: number): string {
+  if (index === 0) return "Today";
   if (index === 1) return "Tomorrow";
   return new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", { weekday: "short" });
 }
@@ -40,6 +46,83 @@ const PANEL_W = 320;
 interface WeatherWidgetProps {
   rowSpan?: number;
   colSpan?: number;
+}
+
+function ForecastCard({
+  day,
+  index,
+  globalMin,
+  tempRange,
+  compact,
+  delay,
+}: {
+  day: { date: string; weatherCode: number; tempMax: number; tempMin: number; precipitationProbability: number };
+  index: number;
+  globalMin: number;
+  tempRange: number;
+  compact?: boolean;
+  delay: number;
+}) {
+  const minPct = ((day.tempMin - globalMin) / tempRange) * 100;
+  const maxPct = ((day.tempMax - globalMin) / tempRange) * 100;
+
+  return (
+    <div
+      className="forecast-day-card group flex items-center gap-2 rounded-lg bg-black/[0.04] dark:bg-white/[0.07] px-2 py-1.5 hover:bg-black/[0.07] dark:hover:bg-white/[0.11] transition-colors"
+      style={{ animationDelay: `${delay}ms` }}
+    >
+      <span className="w-[38px] text-[11px] font-medium text-gray-600/80 dark:text-white/60 shrink-0">
+        {compact ? formatDay(day.date, index) : formatDayLong(day.date, index)}
+      </span>
+      <span className="text-sm w-5 text-center shrink-0 weather-forecast-icon" style={{ animationDelay: `${delay + 100}ms` }}>
+        {getWeatherIcon(day.weatherCode, true)}
+      </span>
+      <span className="w-6 text-[10px] text-blue-500/75 dark:text-blue-300/80 text-right shrink-0">
+        {day.precipitationProbability > 0 ? `${day.precipitationProbability}%` : ""}
+      </span>
+      <div className="flex-1 relative h-[3px] rounded-full bg-black/[0.08] dark:bg-white/[0.12] mx-0.5">
+        <div
+          className="absolute h-full rounded-full forecast-temp-bar"
+          style={{
+            left: `${minPct}%`,
+            width: `${maxPct - minPct}%`,
+            animationDelay: `${delay + 200}ms`,
+          }}
+        />
+      </div>
+      <span className="w-6 text-[11px] text-right text-gray-500/65 dark:text-white/50 shrink-0 tabular-nums">{day.tempMin}°</span>
+      <span className="w-6 text-[11px] text-right text-gray-700/80 dark:text-white/75 shrink-0 tabular-nums font-medium">{day.tempMax}°</span>
+    </div>
+  );
+}
+
+function ForecastColumn({
+  day,
+  index,
+  delay,
+}: {
+  day: { date: string; weatherCode: number; tempMax: number; tempMin: number; precipitationProbability: number };
+  index: number;
+  delay: number;
+}) {
+  return (
+    <div
+      className="forecast-day-card flex flex-col items-center gap-1 rounded-xl bg-black/[0.04] dark:bg-white/[0.07] px-1.5 py-2 hover:bg-black/[0.07] dark:hover:bg-white/[0.11] transition-colors flex-1 min-w-0"
+      style={{ animationDelay: `${delay}ms` }}
+    >
+      <span className="text-[10px] font-medium text-gray-500/70 dark:text-white/50">{formatDay(day.date, index)}</span>
+      <span className="text-base weather-forecast-icon" style={{ animationDelay: `${delay + 100}ms` }}>
+        {getWeatherIcon(day.weatherCode, true)}
+      </span>
+      {day.precipitationProbability > 0 && (
+        <span className="text-[9px] text-blue-500/75 dark:text-blue-300/80 leading-none">{day.precipitationProbability}%</span>
+      )}
+      <div className="flex flex-col items-center">
+        <span className="text-[11px] font-medium text-gray-700/80 dark:text-white/75 tabular-nums">{day.tempMax}°</span>
+        <span className="text-[10px] text-gray-500/55 dark:text-white/45 tabular-nums">{day.tempMin}°</span>
+      </div>
+    </div>
+  );
 }
 
 export default function WeatherWidget({ rowSpan = 1, colSpan = 4 }: WeatherWidgetProps) {
@@ -151,26 +234,49 @@ export default function WeatherWidget({ rowSpan = 1, colSpan = 4 }: WeatherWidge
     setSearchLoading(false);
   };
 
-  const compactRow = rowSpan === 1;
-  const isTiny = compactRow && colSpan <= 2;
-  const isWideCompact = compactRow && colSpan >= 6;
-  const isHorizontal = rowSpan > 1 && colSpan >= rowSpan + 1;
-  const isVertical = rowSpan > 1 && rowSpan >= colSpan + 1;
-  const isNarrowHorizontal = isHorizontal && colSpan <= 4;
-  const isNarrowVertical = isVertical && colSpan <= 3;
-  const forecastDays = compactRow
-    ? (isWideCompact ? 2 : 0)
-    : isHorizontal
-      ? Math.min(4, rowSpan + 1)
-      : isVertical
-        ? Math.min(7, rowSpan + 2)
-        : Math.min(6, rowSpan + 2);
-  const showExtraMetrics = !compactRow;
+  const isCompact = rowSpan === 1;
+  const isTiny = isCompact && colSpan <= 2;
+  const isWide = colSpan >= 7;
+  const isSuperWide = colSpan >= 10;
+  const isTall = rowSpan >= 3;
+
+  const forecastDays = (() => {
+    if (isCompact && colSpan <= 3) return 0;
+    if (isCompact && colSpan <= 5) return 3;
+    if (isCompact && colSpan <= 7) return 5;
+    if (isCompact) return 7;
+    if (isSuperWide) return 7;
+    if (isWide) return 7;
+    if (colSpan >= 5) return Math.min(7, rowSpan + 3);
+    return Math.min(5, rowSpan + 2);
+  })();
+
   const visibleForecast = weather ? weather.daily.slice(0, forecastDays) : [];
   const globalMin = visibleForecast.length > 0 ? Math.min(...visibleForecast.map((d) => d.tempMin)) : 0;
   const globalMax = visibleForecast.length > 0 ? Math.max(...visibleForecast.map((d) => d.tempMax)) : 1;
   const tempRange = Math.max(globalMax - globalMin, 1);
   const weatherTheme = weather ? getWeatherTheme(weather.weatherCode) : "clear";
+
+  const settingsButton = (
+    <button
+      ref={anchorRef}
+      type="button"
+      onClick={() => setOpen((prev) => !prev)}
+      className="w-6 h-6 rounded-md bg-black/[0.04] dark:bg-white/[0.08] flex items-center justify-center hover:bg-black/[0.08] dark:hover:bg-white/[0.14] transition-colors shrink-0"
+      title="Weather settings"
+      aria-expanded={open}
+    >
+      <svg className="w-3.5 h-3.5 text-gray-500/70 dark:text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={1.7}
+          d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+        />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      </svg>
+    </button>
+  );
 
   const popup =
     open &&
@@ -286,9 +392,201 @@ export default function WeatherWidget({ rowSpan = 1, colSpan = 4 }: WeatherWidge
       document.body
     );
 
+  const renderCurrentWeather = (size: "tiny" | "compact" | "normal" | "large") => {
+    if (!weather) return null;
+    const tempSize = size === "large" ? "text-4xl" : size === "normal" ? "text-3xl" : size === "compact" ? "text-xl" : "text-lg";
+    const iconSize = size === "large" ? "text-4xl" : size === "normal" ? "text-3xl" : "text-2xl";
+
+    return (
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-1.5">
+            <span className={`${tempSize} font-light text-gray-700/85 dark:text-white/80 leading-none tabular-nums`}>
+              {weather.temperature}°
+            </span>
+            {size !== "tiny" && (
+              <span className="text-[11px] text-gray-500/55 dark:text-white/40">
+                {weather.unit} · feels {weather.feelsLike}°
+              </span>
+            )}
+          </div>
+          <div className="text-[11px] text-gray-500/60 dark:text-white/45 mt-0.5 truncate">
+            {getWeatherDescription(weather.weatherCode)}
+          </div>
+        </div>
+        <span
+          className={`weather-icon weather-icon--${weatherTheme} ${iconSize} leading-none shrink-0`}
+          role="img"
+          aria-label={getWeatherDescription(weather.weatherCode)}
+        >
+          {getWeatherIcon(weather.weatherCode, weather.isDay)}
+        </span>
+      </div>
+    );
+  };
+
+  const renderMetrics = (layout: "inline" | "grid" | "row") => {
+    if (!weather) return null;
+    const items = [
+      { label: "AQI", value: weather.airQuality.usAqi ?? "--", extra: getAqiLabel(weather.airQuality.usAqi), tone: getAqiTone(weather.airQuality.usAqi) },
+      { label: "Humidity", value: `${weather.humidity}%`, tone: "text-gray-600/75 dark:text-white/60" },
+      { label: "Wind", value: `${weather.windSpeed} km/h`, tone: "text-gray-600/75 dark:text-white/60" },
+      { label: "Precip", value: `${weather.precipitation} mm`, tone: "text-gray-600/75 dark:text-white/60" },
+    ];
+
+    if (layout === "inline") {
+      return (
+        <div className="flex items-center gap-3 text-[10px] flex-wrap">
+          {items.slice(0, 3).map((item) => (
+            <span key={item.label} className={item.tone}>
+              {item.label} {item.value}
+            </span>
+          ))}
+        </div>
+      );
+    }
+
+    if (layout === "row") {
+      return (
+        <div className="flex items-center gap-2 text-[10px]">
+          {items.map((item) => (
+            <div key={item.label} className={`rounded-md bg-black/[0.04] dark:bg-white/[0.07] px-2 py-1 ${item.tone}`}>
+              {item.label} {item.value}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    return (
+      <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+        {items.map((item) => (
+          <div key={item.label} className={`rounded-lg bg-black/[0.04] dark:bg-white/[0.07] px-2 py-1.5 ${item.tone}`}>
+            <span className="text-gray-400/60 dark:text-white/35">{item.label}</span>{" "}
+            {item.value}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderForecastRows = (days: typeof visibleForecast, compact = false) => (
+    <div className="space-y-1">
+      {days.map((day, i) => (
+        <ForecastCard
+          key={day.date}
+          day={day}
+          index={i}
+          globalMin={globalMin}
+          tempRange={tempRange}
+          compact={compact}
+          delay={i * 60}
+        />
+      ))}
+    </div>
+  );
+
+  const renderForecastColumns = (days: typeof visibleForecast) => (
+    <div className="flex gap-1.5">
+      {days.map((day, i) => (
+        <ForecastColumn
+          key={day.date}
+          day={day}
+          index={i}
+          delay={i * 60}
+        />
+      ))}
+    </div>
+  );
+
+  const renderContent = () => {
+    if (!weather) return null;
+
+    // 1×compact: single strip
+    if (isCompact) {
+      return (
+        <div className="flex-1 flex items-center gap-3 min-h-0">
+          <div className="shrink-0">
+            {renderCurrentWeather(isTiny ? "tiny" : "compact")}
+          </div>
+          {!isTiny && visibleForecast.length > 0 && (
+            <div className="flex-1 min-w-0 flex gap-1 justify-end">
+              {visibleForecast.map((day, i) => (
+                <div
+                  key={day.date}
+                  className="forecast-day-card flex flex-col items-center rounded-md bg-black/[0.04] dark:bg-white/[0.07] px-1.5 py-1 min-w-[36px]"
+                  style={{ animationDelay: `${i * 60}ms` }}
+                >
+                  <span className="text-[9px] text-gray-500/60 dark:text-white/45">{formatDay(day.date, i)}</span>
+                  <span className="text-xs weather-forecast-icon" style={{ animationDelay: `${i * 60 + 100}ms` }}>
+                    {getWeatherIcon(day.weatherCode, true)}
+                  </span>
+                  <span className="text-[9px] tabular-nums text-gray-600/70 dark:text-white/55">{day.tempMax}°</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Wide layout (colSpan >= 7): horizontal with forecast on the right
+    if (isWide) {
+      return (
+        <div className="flex-1 flex gap-3 min-h-0">
+          <div className="flex flex-col justify-between shrink-0" style={{ width: isSuperWide ? "220px" : "180px" }}>
+            {renderCurrentWeather(isSuperWide ? "large" : "normal")}
+            <div className="mt-2">
+              {renderMetrics(isTall ? "grid" : "row")}
+            </div>
+          </div>
+          {visibleForecast.length > 0 && (
+            <div className="flex-1 min-w-0 min-h-0">
+              {rowSpan <= 2 ? (
+                renderForecastColumns(visibleForecast)
+              ) : (
+                <div className="h-full overflow-y-auto pr-0.5">
+                  {renderForecastRows(visibleForecast)}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Tall layout (rowSpan >= 3, narrow): stacked
+    if (isTall) {
+      return (
+        <div className="flex-1 flex flex-col gap-2 min-h-0">
+          {renderCurrentWeather("normal")}
+          {renderMetrics("grid")}
+          {visibleForecast.length > 0 && (
+            <div className="flex-1 min-h-0 overflow-y-auto pr-0.5">
+              {renderForecastRows(visibleForecast)}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Default medium layout (2-row, 3-6 cols)
+    return (
+      <div className="flex-1 flex flex-col gap-2 min-h-0">
+        {renderCurrentWeather("normal")}
+        {renderMetrics("inline")}
+        {visibleForecast.length > 0 && (
+          <div className="flex-1 min-h-0 overflow-y-auto pr-0.5">
+            {renderForecastRows(visibleForecast, true)}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="relative h-full w-full">
-      <div className={`widget-card weather-widget weather-widget--${weatherTheme} h-full min-h-0 p-3 sm:p-4 relative overflow-hidden flex flex-col`}>
+      <div className={`widget-card weather-widget weather-widget--${weatherTheme} h-full min-h-0 p-3 relative overflow-hidden flex flex-col`}>
         <div className="weather-widget-effects" aria-hidden>
           {weatherTheme === "rain" &&
             Array.from({ length: 14 }).map((_, i) => (
@@ -301,33 +599,11 @@ export default function WeatherWidget({ rowSpan = 1, colSpan = 4 }: WeatherWidge
         </div>
 
         <div className="relative z-[2] flex h-full flex-col min-h-0">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <div className="text-[11px] text-gray-500/70 dark:text-white/45 truncate">{weather?.city || "Weather"}</div>
-              {!compactRow && (
-                <div className="text-[11px] text-gray-500/60 dark:text-white/40">
-                  {weather ? getWeatherDescription(weather.weatherCode) : "Loading conditions..."}
-                </div>
-              )}
-            </div>
-            <button
-              ref={anchorRef}
-              type="button"
-              onClick={() => setOpen((prev) => !prev)}
-              className="w-7 h-7 rounded-lg bg-black/5 dark:bg-white/10 flex items-center justify-center hover:bg-black/10 dark:hover:bg-white/15 transition-colors"
-              title="Weather settings"
-              aria-expanded={open}
-            >
-              <svg className="w-4 h-4 text-gray-500/80 dark:text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.7}
-                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </button>
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <span className="text-[10px] font-medium text-gray-500/65 dark:text-white/40 uppercase tracking-wider truncate">
+              {weather?.city || "Weather"}
+            </span>
+            {settingsButton}
           </div>
 
           {loading && !weather ? (
@@ -337,195 +613,7 @@ export default function WeatherWidget({ rowSpan = 1, colSpan = 4 }: WeatherWidge
           ) : error && !weather ? (
             <div className="flex-1 flex items-center text-[12px] text-gray-500/70 dark:text-white/45">{error}</div>
           ) : (
-            weather && (
-              <>
-                {compactRow ? (
-                  <div className="flex-1 flex items-center">
-                    <div className="w-full flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex items-baseline gap-1.5">
-                          <span className="text-lg font-medium text-gray-700/85 dark:text-white/80 leading-none">
-                            {weather.temperature}°{weather.unit}
-                          </span>
-                          {!isTiny && (
-                            <span className="text-[11px] text-gray-500/65 dark:text-white/45">
-                              feels {weather.feelsLike}°
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-[11px] text-gray-500/65 dark:text-white/45 truncate">
-                          {getWeatherDescription(weather.weatherCode)}
-                        </div>
-                        {isWideCompact && (
-                          <div className={`mt-1 text-[10px] truncate ${getAqiTone(weather.airQuality.usAqi)}`}>
-                            AQI {weather.airQuality.usAqi ?? "--"} · {getAqiLabel(weather.airQuality.usAqi)}
-                          </div>
-                        )}
-                        {isWideCompact && visibleForecast.length > 0 && (
-                          <div className="mt-1.5 flex items-center gap-1.5">
-                            {visibleForecast.map((day, i) => (
-                              <div key={day.date} className="rounded-md bg-black/5 dark:bg-white/10 px-1.5 py-0.5 min-w-[40px] text-center">
-                                <div className="text-[9px] text-gray-500/70 dark:text-white/45">{formatDay(day.date, i).slice(0, 3)}</div>
-                                <div className="text-[11px] leading-none">{getWeatherIcon(day.weatherCode, true)}</div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      <span
-                        className={`weather-icon weather-icon--${weatherTheme} ${isTiny ? "text-2xl" : "text-3xl"} leading-none`}
-                        role="img"
-                        aria-label={getWeatherDescription(weather.weatherCode)}
-                      >
-                        {getWeatherIcon(weather.weatherCode, weather.isDay)}
-                      </span>
-                    </div>
-                  </div>
-                ) : isHorizontal ? (
-                  <div className="mt-2 grid grid-cols-12 gap-2 flex-1 min-h-0">
-                    <div className={`${isNarrowHorizontal ? "col-span-7" : "col-span-5"} rounded-xl bg-black/5 dark:bg-white/10 p-2.5 flex flex-col justify-between min-h-0`}>
-                      <div className="text-[11px] text-gray-500/70 dark:text-white/45 truncate">{getWeatherDescription(weather.weatherCode)}</div>
-                      <div className="flex items-end justify-between">
-                        <div>
-                          <div className="text-3xl font-light text-gray-700/85 dark:text-white/80 leading-none">
-                            {weather.temperature}°{weather.unit}
-                          </div>
-                          <div className="text-[11px] text-gray-500/65 dark:text-white/45 mt-1">Feels {weather.feelsLike}°</div>
-                        </div>
-                        <span className={`weather-icon weather-icon--${weatherTheme} text-3xl leading-none`} role="img" aria-label={getWeatherDescription(weather.weatherCode)}>
-                          {getWeatherIcon(weather.weatherCode, weather.isDay)}
-                        </span>
-                      </div>
-                    </div>
-                    <div className={`${isNarrowHorizontal ? "col-span-5" : "col-span-3"} rounded-xl bg-black/5 dark:bg-white/10 p-2.5 grid grid-rows-4 gap-1 text-[11px] text-gray-600/80 dark:text-white/65 min-h-0`}>
-                      <div className={getAqiTone(weather.airQuality.usAqi)}>AQI {weather.airQuality.usAqi ?? "--"}</div>
-                      <div>Humidity {weather.humidity}%</div>
-                      <div>Wind {weather.windSpeed}</div>
-                      <div>Precip {weather.precipitation}</div>
-                    </div>
-                    {!isNarrowHorizontal && (
-                      <div className="col-span-4 rounded-xl bg-black/5 dark:bg-white/10 p-2 min-h-0">
-                        <div className="space-y-1.5">
-                          {visibleForecast.map((day, i) => (
-                            <div key={day.date} className="flex items-center justify-between gap-1 text-[10px]">
-                              <span className="text-gray-600/75 dark:text-white/55">{formatDay(day.date, i).slice(0, 3)}</span>
-                              <span>{getWeatherIcon(day.weatherCode, true)}</span>
-                              <span className="text-gray-700/80 dark:text-white/70">{day.tempMax}°</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : isVertical ? (
-                  <div className="mt-2 flex-1 min-h-0 flex flex-col gap-2">
-                    <div className="rounded-xl bg-black/5 dark:bg-white/10 p-2.5">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="text-3xl font-light text-gray-700/85 dark:text-white/80 leading-none">
-                            {weather.temperature}°{weather.unit}
-                          </div>
-                          <div className="text-[11px] text-gray-500/65 dark:text-white/45 mt-1">
-                            Feels {weather.feelsLike}° · {getWeatherDescription(weather.weatherCode)}
-                          </div>
-                        </div>
-                        <span className={`weather-icon weather-icon--${weatherTheme} text-3xl leading-none`} role="img" aria-label={getWeatherDescription(weather.weatherCode)}>
-                          {getWeatherIcon(weather.weatherCode, weather.isDay)}
-                        </span>
-                      </div>
-                    </div>
-                    <div className={`grid ${isNarrowVertical ? "grid-cols-1" : "grid-cols-2"} gap-2 text-[11px]`}>
-                      <div className={`rounded-lg bg-black/5 dark:bg-white/10 px-2 py-1.5 ${getAqiTone(weather.airQuality.usAqi)}`}>
-                        AQI {weather.airQuality.usAqi ?? "--"}
-                      </div>
-                      <div className="rounded-lg bg-black/5 dark:bg-white/10 px-2 py-1.5 text-gray-600/80 dark:text-white/65">Humidity {weather.humidity}%</div>
-                      <div className="rounded-lg bg-black/5 dark:bg-white/10 px-2 py-1.5 text-gray-600/80 dark:text-white/65">Wind {weather.windSpeed}</div>
-                      <div className="rounded-lg bg-black/5 dark:bg-white/10 px-2 py-1.5 text-gray-600/80 dark:text-white/65">PM2.5 {weather.airQuality.pm25 ?? "--"}</div>
-                    </div>
-                    {forecastDays > 0 && (
-                      <div className="rounded-xl bg-black/5 dark:bg-white/10 p-2 space-y-1.5 overflow-y-auto min-h-0">
-                        {visibleForecast.map((day, i) => (
-                          <div key={day.date} className="flex items-center justify-between gap-2 text-[11px]">
-                            <span className="text-gray-600/75 dark:text-white/55">{formatDay(day.date, i)}</span>
-                            <span>{getWeatherIcon(day.weatherCode, true)}</span>
-                            <span className="text-gray-700/80 dark:text-white/70">{day.tempMin}°/{day.tempMax}°</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <>
-                    <div className="mt-2 flex items-center justify-between gap-2">
-                      <div className="flex items-end gap-1">
-                        <span className="text-2xl sm:text-3xl font-light text-gray-700/85 dark:text-white/80 leading-none">
-                          {weather.temperature}°{weather.unit}
-                        </span>
-                        <span className="text-[11px] text-gray-500/60 dark:text-white/45 mb-1">
-                          feels {weather.feelsLike}°
-                        </span>
-                      </div>
-                      <span
-                        className={`weather-icon weather-icon--${weatherTheme} text-3xl leading-none`}
-                        role="img"
-                        aria-label={getWeatherDescription(weather.weatherCode)}
-                      >
-                        {getWeatherIcon(weather.weatherCode, weather.isDay)}
-                      </span>
-                    </div>
-
-                    <div className="mt-2 flex items-center gap-2 flex-wrap">
-                      <span className={`text-[11px] px-2 py-1 rounded-full bg-black/5 dark:bg-white/10 ${getAqiTone(weather.airQuality.usAqi)}`}>
-                        AQI {weather.airQuality.usAqi ?? "--"} · {getAqiLabel(weather.airQuality.usAqi)}
-                      </span>
-                      <span className="text-[11px] px-2 py-1 rounded-full bg-black/5 dark:bg-white/10 text-gray-600/80 dark:text-white/65">
-                        Humidity {weather.humidity}%
-                      </span>
-                    </div>
-
-                    {showExtraMetrics && (
-                      <div className="mt-2 grid grid-cols-3 gap-2 text-[11px] text-gray-600/75 dark:text-white/60">
-                        <div className="rounded-lg bg-black/5 dark:bg-white/10 px-2 py-1.5">Wind {weather.windSpeed}</div>
-                        <div className="rounded-lg bg-black/5 dark:bg-white/10 px-2 py-1.5">Precip {weather.precipitation}</div>
-                        <div className="rounded-lg bg-black/5 dark:bg-white/10 px-2 py-1.5">
-                          PM2.5 {weather.airQuality.pm25 ?? "--"}
-                        </div>
-                      </div>
-                    )}
-
-                    {forecastDays > 0 && (
-                      <div className={`mt-2 ${rowSpan >= 4 ? "flex-1 min-h-0 space-y-1.5 overflow-y-auto pr-1" : "space-y-1.5"}`}>
-                        {visibleForecast.map((day, i) => {
-                          const minPct = ((day.tempMin - globalMin) / tempRange) * 100;
-                          const maxPct = ((day.tempMax - globalMin) / tempRange) * 100;
-                          return (
-                            <div key={day.date} className="flex items-center gap-2">
-                              <span className="w-[62px] text-[11px] text-gray-600/70 dark:text-white/55 shrink-0">{formatDay(day.date, i)}</span>
-                              <span className="text-sm w-5 text-center shrink-0">{getWeatherIcon(day.weatherCode, true)}</span>
-                              <span className="w-7 text-[10px] text-blue-500/75 dark:text-blue-300/80 text-right shrink-0">
-                                {day.precipitationProbability > 0 ? `${day.precipitationProbability}%` : ""}
-                              </span>
-                              <div className="flex-1 relative h-[3px] rounded-full mx-1 bg-black/10 dark:bg-white/15">
-                                <div
-                                  className="absolute h-full rounded-full"
-                                  style={{
-                                    left: `${minPct}%`,
-                                    width: `${maxPct - minPct}%`,
-                                    background: "linear-gradient(to right, rgba(96,165,250,0.7), rgba(251,146,60,0.7))",
-                                  }}
-                                />
-                              </div>
-                              <span className="w-7 text-[11px] text-right text-gray-500/65 dark:text-white/50 shrink-0">{day.tempMin}°</span>
-                              <span className="w-7 text-[11px] text-right text-gray-700/80 dark:text-white/75 shrink-0">{day.tempMax}°</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </>
-                )}
-              </>
-            )
+            weather && renderContent()
           )}
         </div>
       </div>

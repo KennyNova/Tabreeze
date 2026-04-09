@@ -1,13 +1,19 @@
 import { MAX_COL_SPAN, MAX_ROW_SPAN } from "./constants";
-import type { AiProvider, TileItem, WidgetConstraintsMap, WidgetType } from "./types";
+import type { TileItem, WidgetConstraintsMap, WidgetType } from "./types";
 
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function sanitizeSearchProvider(input: unknown): AiProvider | undefined {
+function sanitizeSearchProvider(input: unknown): "chatgpt" | "claude" | undefined {
   if (input === "chatgpt" || input === "claude") return input;
   return undefined;
+}
+
+function sanitizeSearchSourceId(input: unknown): string | undefined {
+  if (typeof input !== "string") return undefined;
+  const cleaned = input.trim();
+  return cleaned ? cleaned : undefined;
 }
 
 export function tilesOverlap(a: TileItem, b: TileItem): boolean {
@@ -105,7 +111,10 @@ export function normalizeLayout(input: unknown, defs: WidgetConstraintsMap, fall
         settings:
           type === "search"
             ? {
-                searchProvider: sanitizeSearchProvider((item as { settings?: { searchProvider?: unknown } }).settings?.searchProvider) ?? "chatgpt",
+                searchSourceId:
+                  sanitizeSearchSourceId((item as { settings?: { searchSourceId?: unknown } }).settings?.searchSourceId) ??
+                  sanitizeSearchProvider((item as { settings?: { searchProvider?: unknown } }).settings?.searchProvider) ??
+                  "chatgpt",
               }
             : undefined,
       };
@@ -135,16 +144,49 @@ export function layoutForDisplay(
   activeGridCols: number,
   defs: WidgetConstraintsMap
 ): TileItem[] {
-  return layout.map((tile) => {
+  const prepared = layout.map((tile, idx) => {
     const def = defs[tile.type];
     const colSpan = clamp(tile.colSpan, def.minColSpan, Math.min(def.maxColSpan, activeGridCols));
     const maxColStart = Math.max(1, activeGridCols - colSpan + 1);
     return {
-      ...tile,
-      colSpan,
-      rowSpan: clamp(tile.rowSpan, def.minRowSpan, def.maxRowSpan),
-      colStart: clamp(tile.colStart, 1, maxColStart),
-      rowStart: Math.max(1, tile.rowStart),
+      idx,
+      tile: {
+        ...tile,
+        colSpan,
+        rowSpan: clamp(tile.rowSpan, def.minRowSpan, def.maxRowSpan),
+        colStart: clamp(tile.colStart, 1, maxColStart),
+        rowStart: Math.max(1, tile.rowStart),
+      } satisfies TileItem,
     };
   });
+
+  // Reflow only for display: keep canonical coordinates untouched, but prevent
+  // visual overlap when reduced columns force multiple tiles into the same area.
+  const ordered = [...prepared].sort((a, b) => {
+    if (a.tile.rowStart !== b.tile.rowStart) return a.tile.rowStart - b.tile.rowStart;
+    if (a.tile.colStart !== b.tile.colStart) return a.tile.colStart - b.tile.colStart;
+    return a.idx - b.idx;
+  });
+
+  const placed: Array<{ idx: number; tile: TileItem }> = [];
+
+  const placeWithoutOverlap = (candidate: TileItem): TileItem => {
+    if (!placed.some((p) => tilesOverlap(candidate, p.tile))) return candidate;
+    const maxColStart = Math.max(1, activeGridCols - candidate.colSpan + 1);
+    for (let row = Math.max(1, candidate.rowStart); row <= 200; row++) {
+      for (let col = 1; col <= maxColStart; col++) {
+        const probe = { ...candidate, colStart: col, rowStart: row };
+        if (!placed.some((p) => tilesOverlap(probe, p.tile))) return probe;
+      }
+    }
+    return { ...candidate, colStart: 1, rowStart: Math.max(1, candidate.rowStart) };
+  };
+
+  for (const item of ordered) {
+    placed.push({ idx: item.idx, tile: placeWithoutOverlap(item.tile) });
+  }
+
+  return placed
+    .sort((a, b) => a.idx - b.idx)
+    .map((entry) => entry.tile);
 }

@@ -11,14 +11,13 @@ export type WidgetType =
   | "calendar"
   | "weather";
 
-export type AiProvider = "chatgpt" | "claude";
-
 export type LayoutMode = "reactive" | "customBreakpoints";
 export type ReactivePreset = "balanced" | "focus" | "dense";
 export type AnimationStyle = "none" | "subtle" | "smooth";
 
 export interface TileSettings {
-  searchProvider?: AiProvider;
+  searchSourceId?: string;
+  searchProvider?: "chatgpt" | "claude";
 }
 
 export interface TileItem {

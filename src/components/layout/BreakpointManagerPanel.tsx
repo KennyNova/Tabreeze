@@ -41,11 +41,36 @@ export default function BreakpointManagerPanel({
     [profiles]
   );
 
-  const sliderMax = useMemo(() => {
-    const maxFromProfiles = Math.max(0, ...profiles.map((p) => p.range.maxWidth));
-    const dynamicMax = Math.max(1600, Math.round(viewportWidth * 1.6), maxFromProfiles);
-    return clamp(dynamicMax, 1000, MAX_VIEWPORT_DIM);
-  }, [profiles, viewportWidth]);
+  const rightmostBoundary = useMemo(() => {
+    if (sortedProfiles.length <= 1) return 0;
+    return sortedProfiles.slice(0, -1).reduce((max, p) => Math.max(max, p.range.maxWidth), 0);
+  }, [sortedProfiles]);
+
+  const monitorWidth = useMemo(() => {
+    if (typeof window === "undefined") return Math.max(1200, Math.round(viewportWidth));
+    const fromScreen = window.screen?.availWidth ?? window.screen?.width ?? viewportWidth;
+    return Math.max(1200, Math.round(fromScreen));
+  }, [viewportWidth]);
+
+  const baseSliderMax = useMemo(() => {
+    const desired = Math.max(monitorWidth, Math.round(viewportWidth * 1.1), rightmostBoundary + 200);
+    return clamp(Math.ceil(desired / 100) * 100, 1000, MAX_VIEWPORT_DIM);
+  }, [monitorWidth, viewportWidth, rightmostBoundary]);
+
+  const [sliderMax, setSliderMax] = useState(baseSliderMax);
+
+  // Keep timeline sensible for typical monitor size instead of jumping to MAX_VIEWPORT_DIM.
+  useEffect(() => {
+    setSliderMax((prev) => (prev < baseSliderMax ? baseSliderMax : prev));
+  }, [baseSliderMax]);
+
+  // If a boundary approaches the end of the timeline, extend the max for continued editing.
+  useEffect(() => {
+    if (rightmostBoundary < sliderMax * 0.9 || sliderMax >= MAX_VIEWPORT_DIM) return;
+    const growBy = Math.max(400, Math.round(monitorWidth * 0.35));
+    const next = clamp(Math.ceil(Math.max(sliderMax + growBy, sliderMax * 1.25) / 100) * 100, 1000, MAX_VIEWPORT_DIM);
+    if (next > sliderMax) setSliderMax(next);
+  }, [rightmostBoundary, sliderMax, monitorWidth]);
 
   const trackRef = useRef<HTMLDivElement>(null);
 
@@ -165,8 +190,13 @@ export default function BreakpointManagerPanel({
           }}
         >
           <div className="flex items-center justify-between gap-2">
-            <div className="text-xs rounded-lg px-3 py-1.5 bg-black/[0.04] dark:bg-white/[0.06] text-gray-600 dark:text-white/50 tabular-nums">
-              Viewport: <span className="font-semibold text-amber-700/90 dark:text-amber-200/90">{Math.round(viewportWidth)}×{Math.round(viewportHeight)}</span>
+            <div className="text-xs rounded-lg px-3 py-1.5 bg-black/[0.04] dark:bg-white/[0.06] text-gray-600 dark:text-white/50 tabular-nums space-y-0.5">
+              <div>
+                Viewport: <span className="font-semibold text-amber-700/90 dark:text-amber-200/90">{Math.round(viewportWidth)}×{Math.round(viewportHeight)}</span>
+              </div>
+              <div className="text-[10px] text-gray-500 dark:text-white/40">
+                Timeline max: <span className="font-semibold">{sliderMax}px</span>
+              </div>
             </div>
             <button
               type="button"
@@ -248,12 +278,9 @@ export default function BreakpointManagerPanel({
               const color = getColor(index);
               return (
                 <div key={p.id} className="flex items-center gap-0.5">
-                  <button
-                    type="button"
-                    disabled={disabled}
-                    onClick={() => onSelectProfile(p.id)}
-                    className={`px-2 py-1 rounded-md text-[10px] font-medium transition-all ${
-                      active ? "ring-2 shadow-sm" : "opacity-75 hover:opacity-100"
+                  <div
+                    className={`px-2 py-1 rounded-md text-[10px] font-medium transition-all inline-flex items-center gap-1 ${
+                      active ? "ring-2 shadow-sm" : "opacity-85"
                     }`}
                     style={{
                       backgroundColor: active ? `${color}30` : "rgba(255,255,255,0.35)",
@@ -261,11 +288,25 @@ export default function BreakpointManagerPanel({
                       ...(active ? { boxShadow: `0 0 0 2px ${color}88` } : {}),
                     }}
                   >
-                    <span className="inline-flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => onSelectProfile(p.id)}
+                      className="inline-flex items-center gap-1 focus:outline-none"
+                      title="Select breakpoint"
+                    >
                       <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
-                      {p.label}
-                    </span>
-                  </button>
+                    </button>
+                    <input
+                      type="text"
+                      disabled={disabled}
+                      value={p.label}
+                      onFocus={() => onSelectProfile(p.id)}
+                      onChange={(e) => onUpdateProfileLabel(p.id, e.target.value)}
+                      className="bg-transparent border-none outline-none text-[10px] font-medium min-w-[66px] max-w-[120px]"
+                      aria-label={`Rename ${p.label}`}
+                    />
+                  </div>
                   <button
                     type="button"
                     disabled={disabled || profiles.length <= 1}
