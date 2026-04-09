@@ -2,7 +2,7 @@
 
 Tabreeze is a customizable new-tab dashboard extension for Chromium-based browsers. It focuses on a clean layout and daily-use widgets such as bookmarks, tasks, calendar, weather, and quick search.
 
-The name **Tabreeze** is a play on words combining **Tabriz**, **breeze**, and **tab**.
+The name is a three-way pun and honestly pretty clever if you ask us. **Tabriz** is an ancient, rugged city nestled in the mountains of northwestern Iran. We took that name, smooshed it together with **breeze**, because getting it exactly how you want it should feel like exactly that — a breeze. Oh, and it goes in your browser **tab**. So yeah. Tabreeze. It was right there.
 
 ## Features
 
