@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+# Required for softprops/action-gh-release to create tags/releases (default token is often read-only).
+permissions:
+  contents: write
+
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
@@ -42,5 +46,3 @@ jobs:
           name: "Build ${{ steps.sha.outputs.short }}"
           body: "Automated build from commit ${{ github.sha }}."
           files: tabreeze.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
