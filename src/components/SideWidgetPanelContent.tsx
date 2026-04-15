@@ -1305,9 +1305,230 @@ interface FocusOfDayState {
   text: string;
 }
 
+// ── Focus text effect helpers ───────────────────────────────────────────────
+
+const FOCUS_ANIM_COUNT = 10;
+const FOCUS_ANIM_NAMES = ["Typewriter", "Flood", "Wave", "Glitch", "Scramble", "Blur", "Stamp", "Neon", "Skew", "Split"] as const;
+const SCRAMBLE_CHARS = "!@#$%&ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789?*";
+const sc = () => SCRAMBLE_CHARS[Math.floor(Math.random() * SCRAMBLE_CHARS.length)];
+
+function FocusTypewriter({ text }: { text: string }) {
+  const [shown, setShown] = useState("");
+  const [phase, setPhase] = useState<"in" | "hold" | "out">("in");
+  useEffect(() => { setShown(""); setPhase("in"); }, [text]);
+  useEffect(() => {
+    if (phase === "in") {
+      if (shown.length < text.length) {
+        const id = setTimeout(() => setShown(text.slice(0, shown.length + 1)), 90);
+        return () => clearTimeout(id);
+      }
+      const id = setTimeout(() => setPhase("hold"), 1200);
+      return () => clearTimeout(id);
+    }
+    if (phase === "hold") {
+      const id = setTimeout(() => setPhase("out"), 600);
+      return () => clearTimeout(id);
+    }
+    if (phase === "out") {
+      if (shown.length > 0) {
+        const id = setTimeout(() => setShown(shown.slice(0, -1)), 52);
+        return () => clearTimeout(id);
+      }
+      const id = setTimeout(() => setPhase("in"), 380);
+      return () => clearTimeout(id);
+    }
+  }, [shown, phase, text]);
+  return (
+    <p className="text-[22px] font-bold text-gray-800 dark:text-white/90 tracking-tight font-mono">
+      {shown}
+      <span className="inline-block w-[2px] h-[1.1em] bg-current ml-0.5 align-middle" style={{ animation: "fw-cursor-blink 0.75s step-end infinite" }} />
+    </p>
+  );
+}
+
+function FocusFlood({ text }: { text: string }) {
+  const MAX = 36;
+  const [count, setCount] = useState(0);
+  const [phase, setPhase] = useState<"fill" | "hold" | "wipe">("fill");
+  useEffect(() => { setCount(0); setPhase("fill"); }, [text]);
+  useEffect(() => {
+    if (phase === "fill") {
+      if (count < MAX) {
+        const id = setTimeout(() => setCount((c) => c + 1), 55);
+        return () => clearTimeout(id);
+      }
+      const id = setTimeout(() => setPhase("hold"), 350);
+      return () => clearTimeout(id);
+    }
+    if (phase === "hold") {
+      const id = setTimeout(() => setPhase("wipe"), 500);
+      return () => clearTimeout(id);
+    }
+    if (phase === "wipe") {
+      if (count > 0) {
+        const id = setTimeout(() => setCount((c) => Math.max(0, c - 3)), 28);
+        return () => clearTimeout(id);
+      }
+      const id = setTimeout(() => setPhase("fill"), 350);
+      return () => clearTimeout(id);
+    }
+  }, [phase, count]);
+  return (
+    <div className="relative w-full min-h-[88px] flex items-center justify-center overflow-hidden">
+      <div className="absolute inset-0 flex flex-wrap content-start gap-x-2 gap-y-1.5 p-3 overflow-hidden pointer-events-none select-none">
+        {Array.from({ length: count }, (_, i) => (
+          <span key={i} className="text-[10px] font-semibold text-gray-400/40 dark:text-white/18 whitespace-nowrap uppercase tracking-wide">
+            {text}
+          </span>
+        ))}
+      </div>
+      <p className="relative z-10 text-[22px] font-bold text-gray-800 dark:text-white/90 select-none">{text}</p>
+    </div>
+  );
+}
+
+function FocusWave({ text }: { text: string }) {
+  return (
+    <p className="text-[22px] font-bold text-gray-800 dark:text-white/90 tracking-tight select-none">
+      {text.split("").map((char, i) => (
+        <span
+          key={i}
+          className="inline-block"
+          style={{ animation: "fw-letter-wave 1.35s ease-in-out infinite", animationDelay: `${i * 0.06}s` }}
+        >
+          {char === " " ? "\u00a0" : char}
+        </span>
+      ))}
+    </p>
+  );
+}
+
+function FocusGlitch({ text }: { text: string }) {
+  return (
+    <div className="relative inline-flex items-center justify-center select-none">
+      <p className="text-[22px] font-bold text-gray-800 dark:text-white/90">{text}</p>
+      <p
+        className="absolute inset-0 flex items-center justify-center text-[22px] font-bold text-red-500/65 pointer-events-none"
+        style={{ animation: "fw-glitch-1 2.2s infinite linear", clipPath: "polygon(0 16%, 100% 16%, 100% 40%, 0 40%)" }}
+      >{text}</p>
+      <p
+        className="absolute inset-0 flex items-center justify-center text-[22px] font-bold text-cyan-500/65 pointer-events-none"
+        style={{ animation: "fw-glitch-2 2.2s infinite linear", clipPath: "polygon(0 60%, 100% 60%, 100% 84%, 0 84%)" }}
+      >{text}</p>
+    </div>
+  );
+}
+
+function FocusScramble({ text }: { text: string }) {
+  const [chars, setChars] = useState<string[]>(() => text.split("").map(sc));
+  const [locked, setLocked] = useState(0);
+  const [mode, setMode] = useState<"lock" | "hold" | "shake">("lock");
+  useEffect(() => { setChars(text.split("").map(sc)); setLocked(0); setMode("lock"); }, [text]);
+  useEffect(() => {
+    if (mode === "lock") {
+      if (locked >= text.length) {
+        const id = setTimeout(() => setMode("hold"), 1500);
+        return () => clearTimeout(id);
+      }
+      const id = setTimeout(() => {
+        const next = locked + 1;
+        setLocked(next);
+        setChars(text.split("").map((ch, i) => i < next ? ch : sc()));
+      }, 82);
+      return () => clearTimeout(id);
+    }
+    if (mode === "hold") {
+      const id = setTimeout(() => setMode("shake"), 400);
+      return () => clearTimeout(id);
+    }
+    if (mode === "shake") {
+      const tick = setInterval(() => setChars(text.split("").map(sc)), 52);
+      const done = setTimeout(() => { clearInterval(tick); setLocked(0); setMode("lock"); }, 650);
+      return () => { clearInterval(tick); clearTimeout(done); };
+    }
+  }, [mode, locked, text]);
+  return (
+    <p className="text-[22px] font-bold font-mono tracking-wider text-gray-800 dark:text-white/90 select-none">
+      {chars.map((ch, i) => (
+        <span key={i} className={i < locked ? "text-gray-800 dark:text-white/90" : "text-gray-400/55 dark:text-white/28"}>
+          {text[i] === " " ? "\u00a0" : ch}
+        </span>
+      ))}
+    </p>
+  );
+}
+
+function FocusBlur({ text }: { text: string }) {
+  return (
+    <p className="text-[22px] font-bold text-gray-800 dark:text-white/90 select-none"
+       style={{ animation: "fw-blur-breathe 2.6s ease-in-out infinite" }}>
+      {text}
+    </p>
+  );
+}
+
+function FocusStamp({ text }: { text: string }) {
+  return (
+    <div style={{ animation: "fw-stamp 3.6s ease-in-out infinite" }}>
+      <p className="text-[26px] font-black tracking-tight text-gray-800 dark:text-white/90 select-none uppercase">{text}</p>
+    </div>
+  );
+}
+
+function FocusNeon({ text }: { text: string }) {
+  return (
+    <p className="text-[22px] font-bold text-gray-800 dark:text-white/90 select-none"
+       style={{ animation: "fw-neon-flicker 2.8s infinite linear" }}>
+      {text}
+    </p>
+  );
+}
+
+function FocusSkew({ text }: { text: string }) {
+  return (
+    <div className="w-full overflow-hidden flex items-center justify-center">
+      <p className="text-[22px] font-bold text-gray-800 dark:text-white/90 select-none whitespace-nowrap"
+         style={{ animation: "fw-skew-slide 4s ease-in-out infinite" }}>
+        {text}
+      </p>
+    </div>
+  );
+}
+
+function FocusSplit({ text }: { text: string }) {
+  return (
+    <div className="relative select-none" style={{ lineHeight: 1.15 }}>
+      <p className="text-[22px] font-bold text-gray-800 dark:text-white/90 invisible">{text}</p>
+      <p className="absolute top-0 left-0 w-full text-center text-[22px] font-bold text-gray-800 dark:text-white/90"
+         style={{ clipPath: "polygon(0 0, 100% 0, 100% 50%, 0 50%)", animation: "fw-split-top 2.6s ease-in-out infinite" }}>
+        {text}
+      </p>
+      <p className="absolute top-0 left-0 w-full text-center text-[22px] font-bold text-gray-800 dark:text-white/90"
+         style={{ clipPath: "polygon(0 50%, 100% 50%, 100% 100%, 0 100%)", animation: "fw-split-bot 2.6s ease-in-out infinite" }}>
+        {text}
+      </p>
+    </div>
+  );
+}
+
+function FocusTextEffect({ text, mode }: { text: string; mode: number }) {
+  if (mode === 0) return <FocusTypewriter text={text} />;
+  if (mode === 1) return <FocusFlood text={text} />;
+  if (mode === 2) return <FocusWave text={text} />;
+  if (mode === 3) return <FocusGlitch text={text} />;
+  if (mode === 4) return <FocusScramble text={text} />;
+  if (mode === 5) return <FocusBlur text={text} />;
+  if (mode === 6) return <FocusStamp text={text} />;
+  if (mode === 7) return <FocusNeon text={text} />;
+  if (mode === 8) return <FocusSkew text={text} />;
+  return <FocusSplit text={text} />;
+}
+
 function SideGreetingPanel() {
   const [now, setNow] = useState(new Date());
   const [focusInput, setFocusInput] = useState("");
+  const [focusEditing, setFocusEditing] = useState(false);
+  const [animMode, setAnimMode] = useState(0);
   const [focus, setFocus] = useState<FocusOfDayState>(() => {
     const today = toDateKey(new Date());
     try {
@@ -1354,6 +1575,18 @@ function SideGreetingPanel() {
   }, [worldClocks]);
 
   useEffect(() => {
+    if (!focus.text) return;
+    const id = window.setInterval(() => {
+      setAnimMode((prev) => {
+        let next = prev;
+        while (next === prev) next = Math.floor(Math.random() * FOCUS_ANIM_COUNT);
+        return next;
+      });
+    }, 5500);
+    return () => window.clearInterval(id);
+  }, [focus.text]);
+
+  useEffect(() => {
     const today = toDateKey(now);
     if (today === focus.date) return;
     if (focus.text.trim()) {
@@ -1361,6 +1594,7 @@ function SideGreetingPanel() {
       window.setTimeout(() => setShowConfetti(false), 2800);
     }
     setFocus({ date: today, text: "" });
+    setFocusEditing(false);
   }, [now, focus]);
 
   const addFocus = () => {
@@ -1368,10 +1602,12 @@ function SideGreetingPanel() {
     if (!text) return;
     setFocus({ date: toDateKey(now), text });
     setFocusInput("");
+    setFocusEditing(false);
   };
 
   const clearFocus = () => {
     setFocus({ date: toDateKey(now), text: "" });
+    setFocusEditing(false);
   };
 
   const addTimezone = (timezone: string) => {
@@ -1393,6 +1629,8 @@ function SideGreetingPanel() {
   const countdown = formatCountdown(getNextMidnight(now).getTime() - now.getTime());
   const dateStr = now.toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 
+  const hasFocus = Boolean(focus.text);
+
   return (
     <div className="h-full min-h-0 flex flex-col gap-3 overflow-y-auto pr-1">
       <div className="glass rounded-xl p-5 relative overflow-hidden">
@@ -1413,25 +1651,59 @@ function SideGreetingPanel() {
         </div>
       </div>
 
-      <div className="glass rounded-xl p-3">
-        <div className="text-[11px] uppercase tracking-wide text-gray-500/80 dark:text-white/45 mb-2">Focus of the day</div>
-        <form onSubmit={(e) => { e.preventDefault(); addFocus(); }} className="flex gap-2 mb-2">
-          <input value={focusInput} onChange={(e) => setFocusInput(e.target.value)} placeholder="What's your one focus today?" className="input-field text-sm !py-2" />
-          <button type="submit" className="btn-primary text-xs px-3 py-2">Set</button>
-        </form>
-        {focus.text ? (
-          <div className="rounded-lg px-3 py-2 bg-black/[0.03] dark:bg-white/[0.05]">
-            <div className="text-[11px] text-gray-400/70 dark:text-white/30 mb-1">Active focus</div>
-            <div className="flex items-start gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500/65 mt-1.5 shrink-0" />
-              <p className="flex-1 text-[13px] text-gray-700/85 dark:text-white/65">{focus.text}</p>
-              <button type="button" onClick={clearFocus} className="text-[10px] text-red-400/70 hover:text-red-500">Clear</button>
-            </div>
+      {/* Focus of the day — full-card text animation when active */}
+      {hasFocus && !focusEditing ? (
+        <div className="glass rounded-2xl relative overflow-hidden flex flex-col items-center justify-center px-5 py-8 text-center min-h-[180px]">
+          {/* label */}
+          <div className="text-[9px] uppercase tracking-[0.28em] font-bold text-gray-400/55 dark:text-white/28 mb-4 select-none">
+            Focus on
           </div>
-        ) : (
-          <div className="text-center text-gray-400/40 dark:text-white/15 text-[12px] py-2">Set one clear priority for today</div>
-        )}
-      </div>
+
+          {/* animated text — key forces remount + fade-in on each mode change */}
+          <div
+            key={animMode}
+            className="flex items-center justify-center w-full px-4"
+            style={{ animation: "fw-mode-enter 0.55s cubic-bezier(0.16,1,0.3,1) both" }}
+          >
+            <FocusTextEffect text={focus.text} mode={animMode} />
+          </div>
+
+          {/* edit pencil */}
+          <button
+            type="button"
+            onClick={() => { setFocusInput(focus.text); setFocusEditing(true); }}
+            className="absolute top-3 right-3 w-7 h-7 rounded-lg inline-flex items-center justify-center bg-black/[0.05] dark:bg-white/[0.08] text-gray-500/60 dark:text-white/35 hover:bg-black/[0.1] dark:hover:bg-white/[0.15] hover:text-gray-700 dark:hover:text-white/70 transition-colors"
+            aria-label="Edit focus"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M9 13l6.586-6.586a2 2 0 012.828 0l.172.172a2 2 0 010 2.828L12 16H9v-3z" />
+            </svg>
+          </button>
+        </div>
+      ) : (
+        <div className="glass rounded-xl p-3">
+          <div className="text-[11px] uppercase tracking-wide text-gray-500/80 dark:text-white/45 mb-2">Focus of the day</div>
+          <form onSubmit={(e) => { e.preventDefault(); addFocus(); }} className="flex gap-2 mb-2">
+            <input
+              autoFocus={focusEditing}
+              value={focusInput}
+              onChange={(e) => setFocusInput(e.target.value)}
+              placeholder="What's your one focus today?"
+              className="input-field text-sm !py-2"
+            />
+            <button type="submit" className="btn-primary text-xs px-3 py-2">Set</button>
+          </form>
+          {focusEditing && (
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setFocusEditing(false)} className="btn-ghost text-xs">Cancel</button>
+              <button type="button" onClick={clearFocus} className="text-[11px] text-red-400/70 hover:text-red-500 px-1">Clear focus</button>
+            </div>
+          )}
+          {!focusEditing && !hasFocus && (
+            <div className="text-center text-gray-400/40 dark:text-white/15 text-[12px] py-2">Set one clear priority for today</div>
+          )}
+        </div>
+      )}
 
       <div className="glass rounded-xl p-3">
         <div className="text-[11px] uppercase tracking-wide text-gray-500/80 dark:text-white/45 mb-2">World clocks</div>

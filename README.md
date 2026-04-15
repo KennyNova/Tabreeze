@@ -1,100 +1,141 @@
 # Tabreeze
 
-Tabreeze is a customizable new-tab dashboard extension for Chromium-based browsers. It focuses on a clean layout and daily-use widgets such as bookmarks, tasks, calendar, weather, and quick search.
+> Your new tab page, but actually useful.
 
-The name is a three-way pun and honestly pretty clever if you ask us. **Tabriz** is an ancient, rugged city nestled in the mountains of northwestern Iran. We took that name, smooshed it together with **breeze**, because getting it exactly how you want it should feel like exactly that — a breeze. Oh, and it goes in your browser **tab**. So yeah. Tabreeze. It was right there.
+I got sick of opening a new tab and staring at a blank page or some stock photo I didn't ask for. Ctrl+T is muscle memory — you do it a hundred times a day — but the browser still makes you take the scenic route every time. So I did what any developer does on a weekend: I built a replacement.
+
+**Tabreeze** is a fully customizable new tab dashboard that runs as a Chrome/Edge extension. Built with React, TypeScript, Tailwind, and Vite.
+
+The name? **Tabriz** is an ancient city in northwestern Iran — rugged, storied. Smoosh that with **breeze**, because using and configuring this thing should feel like exactly that. Oh, and it lives in your browser **tab**. Tabreeze. It was right there.
+
+---
+
+## Table of contents
+
+- [Features](#features)
+- [Tech stack](#tech-stack)
+- [Getting started](#getting-started)
+  - [Option A — Pre-built ZIP (simplest)](#option-a--pre-built-zip-simplest)
+  - [Option B — Build from source](#option-b--build-from-source)
+  - [Load as unpacked extension](#load-as-unpacked-extension)
+- [Development](#development)
+  - [Web UI mode](#web-ui-mode)
+  - [Extension auto-reload](#extension-auto-reload)
+- [Project structure](#project-structure)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
 
 ## Features
 
-- Clock and greeting
-- Search launcher (per-widget source dropdown + custom source add button, up to 5 custom sources)
-- Speed-dial style bookmarks
-- Tasks widget with drag-and-drop ordering
-- Calendar widget (Google + Outlook)
-- Weather widget
-- Light and dark theme toggle
-- Wallpaper customization
-- Flexible responsive tile layout
+- **Search launcher** — pick your AI provider per search (ChatGPT, Claude, Perplexity, and more), add up to 5 custom sources
+- **Bookmark sync widget** — your Chrome bookmarks, surfaced and searchable right on your dashboard
+- **Tasks** — drag-and-drop ordering, right there on your new tab
+- **Calendar** — Google and Outlook support
+- **Weather widget** — current conditions at a glance
+- **Clock & greeting** — because why not
+- **Tile-based layout** — add, remove, and rearrange widgets until the page works the way you do
+- **Custom breakpoints** — set your own layout breakpoints so the dashboard snaps exactly how you want at any screen size
+- **Themes & wallpaper** — light/dark toggle, custom wallpaper support
 
-## Tech Stack
+---
 
-- React
-- TypeScript
-- Vite
-- Tailwind CSS
-- Chrome Extension Manifest V3
+## Tech stack
 
-## Prerequisites
 
-- Node.js 18+
-- npm
+|           |                    |
+| --------- | ------------------ |
+| UI        | React + TypeScript |
+| Styling   | Tailwind CSS       |
+| Bundler   | Vite               |
+| Extension | Chrome Manifest V3 |
 
-## Install
+
+---
+
+## Getting started
+
+### Option A — Pre-built ZIP (simplest)
+
+No Node, no terminal — just the extension.
+
+1. Open **[Releases](https://github.com/KennyNova/Tabriz/releases)** and download the latest `**tabreeze.zip`**.
+2. Unzip it anywhere you like. You should see `**manifest.json**` right inside that folder (that’s the built extension).
+3. Go to [Load as unpacked extension](#load-as-unpacked-extension) below.
+
+### Option B — Build from source
+
+**Prerequisites:** Node.js 18+ and npm.
 
 ```bash
+git clone https://github.com/KennyNova/Tabriz.git
+cd Tabriz
 npm install
-```
-
-## Build
-
-```bash
 npm run build
 ```
 
-The production extension output is generated in `dist/`.
+Production output lands in `**dist/**`.
 
-## Run for Web UI Development
+### Load as unpacked extension
+
+1. Open your browser’s extension page:
+  - **Chrome** → `chrome://extensions`
+  - **Edge** → `edge://extensions`
+  - **Brave** → `brave://extensions`
+2. Turn on **Developer mode** (usually top right).
+3. Click **Load unpacked**.
+4. Select the unzipped folder — the one whose root contains `**manifest.json`**. (If you built from source, pick `**dist/**` instead.)
+
+That’s it — Tabreeze is now your new tab page.
+
+---
+
+## Developmenttab
+
+### Web UI mode
+
+For fast UI iteration without loading the full extension:
 
 ```bash
 npm run dev
 ```
 
-This starts a local Vite server for quick UI iteration.
+Starts a local Vite dev server.
 
-## Load as Unpacked Extension
+### Extension auto-reload
 
-1. Build the project with `npm run build` (or use `npm run dev:ext` for watch mode).
-2. Open `chrome://extensions` or `brave://extensions`.
-3. Enable **Developer mode**.
-4. Click **Load unpacked**.
-5. Select the `dist/` folder from this project.
-
-## Extension Auto-Reload Workflow
-
-Use this when developing extension behavior instead of only local UI:
+For developing extension behavior (service worker, background scripts, etc.):
 
 ```bash
 npm run dev:ext
 ```
 
-When build output changes, the reload script attempts to refresh the installed extension using the DevTools remote debugging port.
+Watches for build output changes and attempts to refresh the installed extension via the DevTools remote debugging port.
 
-- Default debugging port: `9222`
-- Override port with `CDP_PORT`
-- Override extension display name match with `EXT_MANIFEST_NAME` (default: `Tabreeze`)
 
-Manual reload command:
+| Option               | Default                                        |
+| -------------------- | ---------------------------------------------- |
+| Debugging port       | `9222` (override with `CDP_PORT`)              |
+| Extension name match | `Tabreeze` (override with `EXT_MANIFEST_NAME`) |
+
+
+Manual reload trigger:
 
 ```bash
 npm run reload:ext
 ```
 
-## Project Structure
+---
 
-```text
-src/
-  App.tsx
-  main.tsx
-  components/
-  services/
-  layout/
-  styles/
-public/
-  background.js
-  icons/
-manifest.json
-```
+## Contributing
+
+This is a developer preview. If something clicks (or doesn’t) — open an issue, start a discussion, or just DM. Feature requests are very welcome.
+
+Want to go further? Fork it, twist it, make it yours. That’s the whole point.
+
+---
 
 ## License
 
-This project is licensed under the terms in `LICENSE`.
+**MIT** — use it, change it, ship it; just keep the copyright notice if you redistribute. Full text in [`LICENSE`](LICENSE).
