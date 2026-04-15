@@ -1,9 +1,19 @@
+export interface HourlyForecast {
+  time: string;
+  temperature: number;
+  weatherCode: number;
+  precipitationProbability: number;
+  windSpeed: number;
+  humidity: number;
+}
+
 interface DailyForecast {
   date: string;
   weatherCode: number;
   tempMax: number;
   tempMin: number;
   precipitationProbability: number;
+  hourly: HourlyForecast[];
 }
 
 interface AirQualityData {
@@ -20,6 +30,7 @@ export interface WeatherData {
   isDay: boolean;
   humidity: number;
   windSpeed: number;
+  windDirection: number;
   precipitation: number;
   airQuality: AirQualityData;
   daily: DailyForecast[];
@@ -60,7 +71,7 @@ export function saveWeatherSettings(settings: WeatherSettings): void {
 }
 
 function cacheKey(lat: number, lon: number, unit: string): string {
-  return `dashboard-weather-${unit}-${lat.toFixed(2)}-${lon.toFixed(2)}`;
+  return `dashboard-weather-v2-${unit}-${lat.toFixed(2)}-${lon.toFixed(2)}`;
 }
 
 function toTemp(valueC: number, unit: "C" | "F"): number {
@@ -76,12 +87,26 @@ function createMockWeather(unit: "C" | "F", lat = 33.94, lon = -84.38, city = "S
     const maxC = [18, 20, 21, 19, 17, 20, 22][idx];
     const weatherCodes = [1, 2, 61, 3, 80, 71, 0];
     const precip = [5, 12, 55, 20, 65, 35, 0];
+    const dateStr = d.toISOString().split("T")[0];
+    const hourly: HourlyForecast[] = Array.from({ length: 24 }, (_, h) => {
+      const fraction = Math.sin((h - 6) * Math.PI / 12);
+      const tempC = minC + (maxC - minC) * Math.max(0, fraction * 0.8 + 0.2);
+      return {
+        time: `${dateStr}T${String(h).padStart(2, "0")}:00`,
+        temperature: toTemp(tempC, unit),
+        weatherCode: weatherCodes[idx],
+        precipitationProbability: h >= 10 && h <= 16 ? precip[idx] : Math.round(precip[idx] * 0.3),
+        windSpeed: 10 + Math.round(Math.random() * 15),
+        humidity: 40 + Math.round(Math.random() * 30),
+      };
+    });
     return {
-      date: d.toISOString().split("T")[0],
+      date: dateStr,
       weatherCode: weatherCodes[idx],
       tempMax: toTemp(maxC, unit),
       tempMin: toTemp(minC, unit),
       precipitationProbability: precip[idx],
+      hourly,
     };
   });
 
@@ -93,6 +118,7 @@ function createMockWeather(unit: "C" | "F", lat = 33.94, lon = -84.38, city = "S
     isDay: true,
     humidity: 49,
     windSpeed: 17,
+    windDirection: 235,
     precipitation: 0,
     airQuality: { usAqi: 43, pm25: 10, pm10: 16 },
     daily: mockDaily,
@@ -123,6 +149,7 @@ function normalizeWeatherData(data: any): WeatherData | null {
     isDay: typeof data.isDay === "boolean" ? data.isDay : true,
     humidity: Math.round(typeof data.humidity === "number" ? data.humidity : 0),
     windSpeed: Math.round(typeof data.windSpeed === "number" ? data.windSpeed : 0),
+    windDirection: Math.round(typeof data.windDirection === "number" ? data.windDirection : 0),
     precipitation: Math.round(typeof data.precipitation === "number" ? data.precipitation : 0),
     airQuality: {
       usAqi: typeof data.airQuality?.usAqi === "number" ? Math.round(data.airQuality.usAqi) : null,
@@ -137,6 +164,14 @@ function normalizeWeatherData(data: any): WeatherData | null {
       precipitationProbability: Math.round(
         typeof d?.precipitationProbability === "number" ? d.precipitationProbability : 0
       ),
+      hourly: Array.isArray(d?.hourly) ? d.hourly.map((h: any) => ({
+        time: typeof h?.time === "string" ? h.time : "",
+        temperature: Math.round(typeof h?.temperature === "number" ? h.temperature : 0),
+        weatherCode: typeof h?.weatherCode === "number" ? h.weatherCode : 0,
+        precipitationProbability: Math.round(typeof h?.precipitationProbability === "number" ? h.precipitationProbability : 0),
+        windSpeed: Math.round(typeof h?.windSpeed === "number" ? h.windSpeed : 0),
+        humidity: Math.round(typeof h?.humidity === "number" ? h.humidity : 0),
+      })) : [],
     })),
     unit: data.unit === "F" ? "F" : "C",
     lat: typeof data.lat === "number" ? data.lat : 0,
@@ -311,8 +346,9 @@ export async function fetchWeather(
   const [weatherRes, city, airQuality] = await Promise.all([
     fetch(
       `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-        `&current=temperature_2m,apparent_temperature,weather_code,is_day,relative_humidity_2m,wind_speed_10m,precipitation` +
+        `&current=temperature_2m,apparent_temperature,weather_code,is_day,relative_humidity_2m,wind_speed_10m,wind_direction_10m,precipitation` +
         `&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max` +
+        `&hourly=temperature_2m,weather_code,precipitation_probability,wind_speed_10m,relative_humidity_2m` +
         `&timezone=auto&temperature_unit=${tempUnit}&forecast_days=7`
     ),
     cityOverride ? Promise.resolve(cityOverride) : reverseGeocode(lat, lon),
@@ -327,6 +363,25 @@ export async function fetchWeather(
   const json = await weatherRes.json();
   const current = json.current;
   const daily = json.daily;
+  const hourly = json.hourly;
+
+  const hourlyByDate = new Map<string, HourlyForecast[]>();
+  if (hourly?.time) {
+    (hourly.time as string[]).forEach((isoTime: string, i: number) => {
+      const dateKey = isoTime.slice(0, 10);
+      const entry: HourlyForecast = {
+        time: isoTime,
+        temperature: Math.round(hourly.temperature_2m?.[i] ?? 0),
+        weatherCode: hourly.weather_code?.[i] ?? 0,
+        precipitationProbability: Math.round(hourly.precipitation_probability?.[i] ?? 0),
+        windSpeed: Math.round(hourly.wind_speed_10m?.[i] ?? 0),
+        humidity: Math.round(hourly.relative_humidity_2m?.[i] ?? 0),
+      };
+      const bucket = hourlyByDate.get(dateKey);
+      if (bucket) bucket.push(entry);
+      else hourlyByDate.set(dateKey, [entry]);
+    });
+  }
 
   const data: WeatherData = {
     temperature: Math.round(current.temperature_2m),
@@ -336,6 +391,7 @@ export async function fetchWeather(
     isDay: current.is_day === 1,
     humidity: Math.round(current.relative_humidity_2m ?? 0),
     windSpeed: Math.round(current.wind_speed_10m ?? 0),
+    windDirection: Math.round(current.wind_direction_10m ?? 0),
     precipitation: Math.round(current.precipitation ?? 0),
     airQuality,
     unit,
@@ -347,6 +403,7 @@ export async function fetchWeather(
       tempMax: Math.round(daily.temperature_2m_max[i]),
       tempMin: Math.round(daily.temperature_2m_min[i]),
       precipitationProbability: Math.round(daily.precipitation_probability_max?.[i] ?? 0),
+      hourly: hourlyByDate.get(date) ?? [],
     })),
   };
 

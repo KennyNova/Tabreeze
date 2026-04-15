@@ -168,7 +168,6 @@ function collectBookmarksFromFolder(
 }
 
 export default function HomelabSidebar() {
-  const [isOpen, setIsOpen] = useState(false);
   const [services, setServices] = useState<HomelabService[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -302,18 +301,6 @@ export default function HomelabSidebar() {
   useEffect(() => {
     if (showAddForm && nameInputRef.current) nameInputRef.current.focus();
   }, [showAddForm]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setIsOpen(false);
-        setShowFolderPicker(false);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [isOpen]);
 
   // ── Manual service CRUD ──
 
@@ -456,42 +443,7 @@ export default function HomelabSidebar() {
     services.length + bookmarkItems.filter((b) => b.enabled).length;
 
   return (
-    <>
-      {/* Toggle button */}
-      <button
-        onClick={() => setIsOpen(true)}
-        className={`fixed right-0 top-1/2 -translate-y-1/2 z-40 transition-all duration-300 ${
-          isOpen ? "opacity-0 pointer-events-none translate-x-4" : "opacity-100"
-        }`}
-        title="Homelab Services"
-      >
-        <div className="glass flex items-center gap-2 pl-3 pr-2 py-2.5 rounded-l-xl rounded-r-none cursor-pointer hover:pl-4 transition-all duration-200 group">
-          <svg className="w-5 h-5 text-gray-500 dark:text-white/50 group-hover:text-gray-700 dark:group-hover:text-white/80 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z" />
-          </svg>
-          {totalTracked > 0 && (
-            <span className="text-[11px] font-medium text-gray-400 dark:text-white/40 tabular-nums">
-              {onlineCount}/{totalTracked}
-            </span>
-          )}
-        </div>
-      </button>
-
-      {/* Backdrop */}
-      {isOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black/10 dark:bg-black/30 backdrop-blur-[2px] homelab-backdrop-in"
-          onClick={() => { setIsOpen(false); setShowFolderPicker(false); }}
-        />
-      )}
-
-      {/* Sidebar panel */}
-      <div
-        className={`fixed top-0 right-0 z-50 h-full w-[340px] max-w-[90vw] transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
-          isOpen ? "translate-x-0" : "translate-x-full"
-        }`}
-      >
-        <div className="h-full flex flex-col bg-white/70 dark:bg-[#1c1c1e]/90 backdrop-blur-2xl border-l border-white/20 dark:border-white/[0.08] shadow-[-4px_0_24px_rgba(0,0,0,0.08)] dark:shadow-[-4px_0_24px_rgba(0,0,0,0.3)]">
+    <div className="widget-card h-full min-h-0 flex flex-col !p-0 overflow-hidden">
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200/50 dark:border-white/[0.06]">
             <div>
@@ -516,14 +468,6 @@ export default function HomelabSidebar() {
                   </svg>
                 </button>
               )}
-              <button
-                onClick={() => { setIsOpen(false); setShowFolderPicker(false); }}
-                className="p-2 rounded-xl text-gray-400 dark:text-white/40 hover:text-gray-600 dark:hover:text-white/70 hover:bg-gray-100/60 dark:hover:bg-white/[0.06] transition-all"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
             </div>
           </div>
 
@@ -750,9 +694,7 @@ export default function HomelabSidebar() {
               )}
             </>
           )}
-        </div>
-      </div>
-    </>
+    </div>
   );
 }
 

@@ -1,7 +1,7 @@
 import { createDefaultLayoutConfigV2, defaultTileLayout, LEGACY_GRID_COLS_KEY, LEGACY_TILE_LAYOUT_KEY, LAYOUT_CONFIG_V2_KEY } from "./constants";
 import { createDefaultProfilesFromLayout } from "./breakpoints";
 import { clamp, normalizeLayout } from "./tileGeometry";
-import type { LayoutConfigV2, WidgetConstraintsMap } from "./types";
+import type { LayoutConfigV2, SideWidgetSlots, WidgetConstraintsMap, WidgetType } from "./types";
 
 function safeParse(raw: string): unknown {
   try {
@@ -17,6 +17,21 @@ function sanitizeReactivePreset(input: unknown): LayoutConfigV2["reactive"]["pre
 
 function sanitizeAnimationStyle(input: unknown): LayoutConfigV2["reactive"]["animationStyle"] {
   return input === "none" || input === "subtle" || input === "smooth" ? input : "smooth";
+}
+
+function sanitizeSlotWidget(input: unknown, defs: WidgetConstraintsMap): WidgetType | null {
+  if (typeof input !== "string") return null;
+  return Object.prototype.hasOwnProperty.call(defs, input) ? (input as WidgetType) : null;
+}
+
+function sanitizeSideSlots(input: unknown, defs: WidgetConstraintsMap): SideWidgetSlots {
+  const source = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const left = source.left && typeof source.left === "object" ? (source.left as Record<string, unknown>) : {};
+  const right = source.right && typeof source.right === "object" ? (source.right as Record<string, unknown>) : {};
+  return {
+    left: { widget: sanitizeSlotWidget(left.widget, defs) },
+    right: { widget: sanitizeSlotWidget(right.widget, defs) },
+  };
 }
 
 function isLayoutConfigV2(x: unknown): x is LayoutConfigV2 {
@@ -65,6 +80,7 @@ export function loadLayoutConfig(defs: WidgetConstraintsMap): LayoutConfigV2 {
         },
         layout: normalizeLayout(p.layout, defs, defaultTileLayout),
       }));
+      cfg.sideSlots = sanitizeSideSlots((parsed as { sideSlots?: unknown }).sideSlots, defs);
       if (cfg.custom.profiles.length === 0 && cfg.mode === "customBreakpoints") {
         cfg.custom.profiles = createDefaultProfilesFromLayout(cfg.reactive.layout, defs);
         cfg.custom.selectedProfileId = cfg.custom.profiles[0]?.id ?? null;

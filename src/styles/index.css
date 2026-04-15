@@ -2,9 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --theme-bg: #f2f2f7;
+  --theme-surface: #ffffff;
+  --theme-surface-hover: #f7f8fb;
+  --theme-text: #1c1c1e;
+  --theme-text-secondary: #66666b;
+  --theme-accent: #007aff;
+  --theme-accent-hover: #006ce1;
+  --theme-border: #d9d9e1;
+  --theme-scrollbar: #b8b8c4;
+}
+
 @layer base {
   body {
-    @apply bg-[#f2f2f7] text-gray-900 dark:bg-[#1c1c1e] dark:text-white/90;
+    background: var(--theme-bg);
+    color: var(--theme-text);
     font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display",
       system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -18,11 +31,8 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.12);
+    background: color-mix(in srgb, var(--theme-scrollbar) 80%, transparent);
     border-radius: 100px;
-  }
-  .dark ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
   }
 }
 
@@ -88,75 +98,81 @@
 }
 
 @layer components {
+  .theme-text {
+    color: var(--theme-text);
+  }
+
+  .theme-text-secondary {
+    color: var(--theme-text-secondary);
+  }
+
+  .theme-accent {
+    color: var(--theme-accent);
+  }
+
   .glass {
     @apply rounded-2xl backdrop-blur-2xl
-           border border-white/20 dark:border-white/[0.08]
-           shadow-[0_2px_16px_rgba(0,0,0,0.04)] dark:shadow-[0_2px_16px_rgba(0,0,0,0.2)]
+           border
+           shadow-[0_2px_16px_rgba(0,0,0,0.06)]
            transition-all duration-300 ease-out;
-    background: rgba(255, 255, 255, 0.55);
-  }
-  .dark .glass {
-    background: rgba(255, 255, 255, 0.06);
+    border-color: color-mix(in srgb, var(--theme-border) 65%, transparent);
+    background: color-mix(in srgb, var(--theme-surface) 78%, transparent);
+    color: var(--theme-text);
   }
 
   .widget-card {
     @apply glass p-5;
   }
   .widget-card:hover {
-    @apply shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_4px_24px_rgba(0,0,0,0.3)];
-    background: rgba(255, 255, 255, 0.65);
+    @apply shadow-[0_4px_24px_rgba(0,0,0,0.12)];
+    background: color-mix(in srgb, var(--theme-surface-hover) 82%, transparent);
   }
-  .dark .widget-card:hover {
-    background: rgba(255, 255, 255, 0.09);
+
+  .dashboard-shell {
+    align-items: stretch;
+  }
+
+  .side-slot-panel,
+  .side-slot-inner {
+    height: 100%;
+    min-height: 0;
   }
 
   .btn-primary {
     @apply px-4 py-2 rounded-xl font-medium
            text-white active:scale-[0.97] transition-all duration-150;
-    background: rgba(0, 122, 255, 0.85);
+    background: color-mix(in srgb, var(--theme-accent) 86%, transparent);
     backdrop-filter: blur(8px);
   }
   .btn-primary:hover {
-    background: rgba(0, 122, 255, 0.95);
+    background: color-mix(in srgb, var(--theme-accent-hover) 94%, transparent);
   }
 
   .btn-ghost {
     @apply px-3 py-1.5 rounded-xl
-           text-gray-600/80 dark:text-white/50
            transition-all duration-150;
+    color: color-mix(in srgb, var(--theme-text-secondary) 88%, transparent);
   }
   .btn-ghost:hover {
-    background: rgba(0, 0, 0, 0.04);
-  }
-  .dark .btn-ghost:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: color-mix(in srgb, var(--theme-surface-hover) 75%, transparent);
   }
 
   .input-field {
     @apply w-full px-4 py-2.5 rounded-xl
-           text-gray-900 dark:text-white/90
-           placeholder:text-gray-400/60 dark:placeholder:text-white/25
+           placeholder:text-gray-400/60
            focus:outline-none transition-all duration-200;
-    background: rgba(0, 0, 0, 0.03);
-    border: 1px solid rgba(0, 0, 0, 0.06);
-  }
-  .dark .input-field {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.06);
+    color: var(--theme-text);
+    background: color-mix(in srgb, var(--theme-surface) 72%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-border) 65%, transparent);
   }
   .homelab-backdrop-in {
     animation: fadeIn 0.2s ease-out both;
   }
 
   .input-field:focus {
-    background: rgba(0, 0, 0, 0.05);
-    border-color: rgba(0, 122, 255, 0.4);
-    box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.1);
-  }
-  .dark .input-field:focus {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(0, 122, 255, 0.35);
-    box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.12);
+    background: color-mix(in srgb, var(--theme-surface-hover) 82%, transparent);
+    border-color: color-mix(in srgb, var(--theme-accent) 45%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-accent) 16%, transparent);
   }
 
   .weather-widget {
@@ -239,6 +255,96 @@
   }
 }
 
+@keyframes dayDetailInlineOpen {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes dayDetailInlineClose {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+@keyframes dayDetailBarGrow {
+  from {
+    transform: scaleY(0);
+    transform-origin: bottom;
+  }
+  to {
+    transform: scaleY(1);
+    transform-origin: bottom;
+  }
+}
+
+@keyframes dayDetailTooltipIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.day-detail-inline {
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--theme-surface) 92%, transparent) !important;
+}
+
+.day-detail-inline--open {
+  animation: dayDetailInlineOpen 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.day-detail-inline--closing {
+  animation: dayDetailInlineClose 0.2s cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+.day-detail-inline .weather-widget {
+  border-radius: 12px;
+}
+
+.day-detail-hour {
+  animation: forecastSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.day-detail-bar {
+  background: linear-gradient(to top, rgba(96, 165, 250, 0.5), rgba(251, 146, 60, 0.5));
+  animation: dayDetailBarGrow 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.temp-line-graph {
+  animation: tempLineIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  pointer-events: none;
+}
+
+@keyframes tempLineIn {
+  from {
+    opacity: 0;
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.day-detail-tooltip {
+  animation: dayDetailTooltipIn 0.15s ease-out both;
+}
+
 @keyframes forecastSlideIn {
   from {
     opacity: 0;
@@ -270,4 +376,90 @@
     opacity: 1;
     transform: scale(1);
   }
+}
+
+@keyframes focusConfettiFall {
+  0% {
+    transform: translateY(-8px) rotate(0deg) scale(0.95);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.95;
+  }
+  100% {
+    transform: translateY(170px) rotate(240deg) scale(1);
+    opacity: 0;
+  }
+}
+
+.focus-confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 2;
+}
+
+.focus-confetti-piece {
+  position: absolute;
+  top: -12px;
+  width: 8px;
+  height: 12px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #60a5fa, #c084fc);
+  animation: focusConfettiFall 1.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.focus-confetti-piece:nth-child(3n) {
+  background: linear-gradient(180deg, #f472b6, #fb7185);
+}
+
+.focus-confetti-piece:nth-child(4n) {
+  background: linear-gradient(180deg, #34d399, #2dd4bf);
+}
+
+@keyframes bookmarkItemEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes bookmarkOverlayEnter {
+  0% {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.bookmark-item-enter {
+  animation: bookmarkItemEnter 0.36s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+.bookmark-folder-overlay {
+  animation: bookmarkOverlayEnter 0.2s ease-out both;
+}
+
+.bookmark-folder-card,
+.bookmark-custom-item,
+.bookmark-add-card {
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 180ms ease,
+    filter 180ms ease;
+}
+
+.bookmark-folder-card:hover,
+.bookmark-custom-item:hover,
+.bookmark-add-card:hover {
+  transform: translateY(-2px);
+  filter: saturate(1.03);
 }

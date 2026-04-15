@@ -9,7 +9,8 @@ export type WidgetType =
   | "quotes"
   | "tasks"
   | "calendar"
-  | "weather";
+  | "weather"
+  | "homelab";
 
 export type LayoutMode = "reactive" | "customBreakpoints";
 export type ReactivePreset = "balanced" | "focus" | "dense";
@@ -69,11 +70,21 @@ export interface CustomBreakpointState {
   selectedProfileId: string | null;
 }
 
+export interface SideWidgetSlot {
+  widget: WidgetType | null;
+}
+
+export interface SideWidgetSlots {
+  left: SideWidgetSlot;
+  right: SideWidgetSlot;
+}
+
 export interface LayoutConfigV2 {
   version: 2;
   mode: LayoutMode;
   reactive: ReactiveLayoutState;
   custom: CustomBreakpointState;
+  sideSlots: SideWidgetSlots;
 }
 
 export interface WidgetSpanConstraints {

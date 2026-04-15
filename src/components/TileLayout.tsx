@@ -1,16 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
-import Greeting from "./Greeting";
-import SearchBar from "./SearchBar";
-import BookmarksGrid from "./BookmarksGrid";
-import QuotesWidget from "./QuotesWidget";
-import TasksWidget from "./TasksWidget";
-import CalendarWidget from "./CalendarWidget";
-import WeatherWidget from "./WeatherWidget";
 import BreakpointManagerPanel from "./layout/BreakpointManagerPanel";
 import GridConfigPanel from "./layout/GridConfigPanel";
-import { createDefaultLayoutConfigV2, defaultTileLayout } from "../layout/constants";
+import { renderWidgetIcon, TileContent, widgetConstraints, widgetDefinitions } from "./widgetRegistry";
+import { createDefaultLayoutConfigV2, defaultTileLayout, LAYOUT_SIDE_SLOTS_UPDATED_EVENT } from "../layout/constants";
 import {
   createDefaultProfilesFromLayout,
   createNewBreakpointProfile,
@@ -28,7 +22,7 @@ import {
   remapLayoutToGridCols,
   resolveCollisions,
 } from "../layout/tileGeometry";
-import type { AnimationStyle, GridSpec, LayoutConfigV2, ReactivePreset, TileItem, WidgetConstraintsMap, WidgetType } from "../layout/types";
+import type { AnimationStyle, GridSpec, LayoutConfigV2, ReactivePreset, SideWidgetSlots, TileItem, WidgetConstraintsMap, WidgetType } from "../layout/types";
 import {
   MAX_CUSTOM_SEARCH_SOURCES,
   createCustomSearchSource,
@@ -39,17 +33,14 @@ import {
 } from "../search/sources";
 import type { SearchSource } from "../search/sources";
 import SearchSourceLogo from "../search/SearchSourceLogo";
-
-interface WidgetDefinition {
-  label: string;
-  defaultColSpan: number;
-  defaultRowSpan: number;
-  minColSpan: number;
-  maxColSpan: number;
-  minRowSpan: number;
-  maxRowSpan: number;
-  render: (tile: Pick<TileItem, "type" | "colSpan" | "rowSpan" | "settings">) => ReactNode;
-}
+import {
+  DASHBOARD_ENTER_LAYOUT_EDITOR_EVENT,
+  DASHBOARD_LAYOUT_EDITOR_STATE_UPDATED_EVENT,
+  DASHBOARD_SETTINGS_UPDATED_EVENT,
+  type LayoutEditorState,
+  loadDashboardSettings,
+  type DashboardSettings,
+} from "../settings/dashboardSettings";
 
 interface ResizeState {
   id: string;
@@ -85,109 +76,6 @@ interface DragState {
   previewColStart: number;
   previewRowStart: number;
 }
-
-const widgetDefinitions: Record<WidgetType, WidgetDefinition> = {
-  greeting: {
-    label: "Greeting + Clock",
-    defaultColSpan: 12,
-    defaultRowSpan: 2,
-    minColSpan: 6,
-    maxColSpan: 12,
-    minRowSpan: 2,
-    maxRowSpan: 4,
-    render: () => (
-      <div className="h-full flex items-center justify-center px-2">
-        <Greeting />
-      </div>
-    ),
-  },
-  search: {
-    label: "Search Bar",
-    defaultColSpan: 12,
-    defaultRowSpan: 1,
-    minColSpan: 4,
-    maxColSpan: 12,
-    minRowSpan: 1,
-    maxRowSpan: 2,
-    render: (tile) => (
-      <div className="h-full flex items-center justify-center px-2">
-        <SearchBar sourceId={tile.settings?.searchSourceId ?? tile.settings?.searchProvider ?? "chatgpt"} />
-      </div>
-    ),
-  },
-  bookmarks: {
-    label: "Bookmarks",
-    defaultColSpan: 12,
-    defaultRowSpan: 2,
-    minColSpan: 4,
-    maxColSpan: 12,
-    minRowSpan: 1,
-    maxRowSpan: 5,
-    render: () => <BookmarksGrid />,
-  },
-  quotes: {
-    label: "Quotes / News",
-    defaultColSpan: 12,
-    defaultRowSpan: 2,
-    minColSpan: 3,
-    maxColSpan: 12,
-    minRowSpan: 2,
-    maxRowSpan: 5,
-    render: () => <QuotesWidget />,
-  },
-  tasks: {
-    label: "Tasks",
-    defaultColSpan: 6,
-    defaultRowSpan: 3,
-    minColSpan: 3,
-    maxColSpan: 12,
-    minRowSpan: 2,
-    maxRowSpan: 5,
-    render: () => <TasksWidget />,
-  },
-  calendar: {
-    label: "Calendar",
-    defaultColSpan: 6,
-    defaultRowSpan: 3,
-    minColSpan: 3,
-    maxColSpan: 12,
-    minRowSpan: 2,
-    maxRowSpan: 5,
-    render: () => <CalendarWidget />,
-  },
-  weather: {
-    label: "Weather",
-    defaultColSpan: 4,
-    defaultRowSpan: 1,
-    minColSpan: 2,
-    maxColSpan: 12,
-    minRowSpan: 1,
-    maxRowSpan: 5,
-    render: (tile) => (
-      <div className="h-full w-full flex items-stretch">
-        <WeatherWidget rowSpan={tile.rowSpan} colSpan={tile.colSpan} />
-      </div>
-    ),
-  },
-};
-
-function buildWidgetConstraints(): WidgetConstraintsMap {
-  const m = {} as WidgetConstraintsMap;
-  (Object.keys(widgetDefinitions) as WidgetType[]).forEach((k) => {
-    const d = widgetDefinitions[k];
-    m[k] = {
-      minColSpan: d.minColSpan,
-      maxColSpan: d.maxColSpan,
-      minRowSpan: d.minRowSpan,
-      maxRowSpan: d.maxRowSpan,
-      defaultColSpan: d.defaultColSpan,
-      defaultRowSpan: d.defaultRowSpan,
-    };
-  });
-  return m;
-}
-
-const widgetConstraints = buildWidgetConstraints();
 const BREAKPOINT_ACCENTS = ["#ec4899", "#8b5cf6", "#3b82f6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444"];
 
 function cloneConfig(c: LayoutConfigV2): LayoutConfigV2 {
@@ -197,24 +85,6 @@ function cloneConfig(c: LayoutConfigV2): LayoutConfigV2 {
 function getSearchSourceId(tile: TileItem): string {
   if (tile.type !== "search") return "chatgpt";
   return tile.settings?.searchSourceId ?? tile.settings?.searchProvider ?? "chatgpt";
-}
-
-function renderWidgetIcon(type: WidgetType): ReactNode {
-  if (type === "greeting") return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z" /></svg>;
-  if (type === "search") return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M21 21l-4.3-4.3m1.3-4.7a6 6 0 11-12 0 6 6 0 0112 0z" /></svg>;
-  if (type === "bookmarks") return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-4-7 4V5z" /></svg>;
-  if (type === "quotes") return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M7 8h6M7 12h10M7 16h5M5 4h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z" /></svg>;
-  if (type === "tasks") return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M9 6h11M9 12h11M9 18h11M5 6h.01M5 12h.01M5 18h.01" /></svg>;
-  if (type === "calendar") return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M8 3v3m8-3v3M4 9h16M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>;
-  return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M3 15a4 4 0 014-4 5 5 0 019.6-1.5A3.5 3.5 0 0117.5 17H6a3 3 0 01-3-2z" /></svg>;
-}
-
-function TileContent({ tile }: { tile: Pick<TileItem, "type" | "colSpan" | "rowSpan" | "settings"> }) {
-  const rendered = useMemo(
-    () => widgetDefinitions[tile.type].render({ type: tile.type, colSpan: tile.colSpan, rowSpan: tile.rowSpan, settings: tile.settings }),
-    [tile.colSpan, tile.rowSpan, tile.settings, tile.type]
-  );
-  return <div className="h-full min-h-0 [&>.widget-card]:h-full [&>.widget-card]:min-h-0">{rendered}</div>;
 }
 
 function EditButton({ icon, title, onClick, disabled }: { icon: ReactNode; title: string; onClick: () => void; disabled?: boolean }) {
@@ -277,6 +147,7 @@ function MiniLayoutPreview({
     tasks: "from-emerald-500/70 to-teal-500/70",
     calendar: "from-pink-500/70 to-rose-500/70",
     weather: "from-blue-500/70 to-indigo-500/70",
+    homelab: "from-slate-500/70 to-indigo-500/70",
   };
 
   const updateInteractiveTile = (
@@ -448,6 +319,9 @@ export default function TileLayout() {
   const [resizing, setResizing] = useState<ResizeState | null>(null);
   const [dragging, setDragging] = useState<DragState | null>(null);
   const [customSearchSources, setCustomSearchSources] = useState<SearchSource[]>(() => loadCustomSearchSources());
+  const [showCustomizeButton, setShowCustomizeButton] = useState<boolean>(
+    () => loadDashboardSettings().showCustomizeButton
+  );
   const [openSearchSourceMenuTileId, setOpenSearchSourceMenuTileId] = useState<string | null>(null);
   const availableSearchSources = useMemo(
     () => getAvailableSearchSources(customSearchSources),
@@ -509,6 +383,58 @@ export default function TileLayout() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [showLayoutSettingsModal]);
+
+  useEffect(() => {
+    const onSideSlotsUpdated = (event: Event) => {
+      const customEvent = event as CustomEvent<SideWidgetSlots>;
+      const slots = customEvent.detail;
+      if (!slots) return;
+      setLayoutConfig((prev) => ({ ...prev, sideSlots: slots }));
+      setSavedConfig((prev) => ({ ...prev, sideSlots: slots }));
+    };
+    window.addEventListener(LAYOUT_SIDE_SLOTS_UPDATED_EVENT, onSideSlotsUpdated as EventListener);
+    return () => window.removeEventListener(LAYOUT_SIDE_SLOTS_UPDATED_EVENT, onSideSlotsUpdated as EventListener);
+  }, []);
+
+  useEffect(() => {
+    const onDashboardSettingsUpdated = (event: Event) => {
+      const customEvent = event as CustomEvent<DashboardSettings>;
+      if (typeof customEvent.detail?.showCustomizeButton !== "boolean") return;
+      setShowCustomizeButton(customEvent.detail.showCustomizeButton);
+    };
+    window.addEventListener(
+      DASHBOARD_SETTINGS_UPDATED_EVENT,
+      onDashboardSettingsUpdated as EventListener
+    );
+    return () =>
+      window.removeEventListener(
+        DASHBOARD_SETTINGS_UPDATED_EVENT,
+        onDashboardSettingsUpdated as EventListener
+      );
+  }, []);
+
+  useEffect(() => {
+    const onEnterLayoutEditor = () => {
+      setEditMode(true);
+    };
+    window.addEventListener(
+      DASHBOARD_ENTER_LAYOUT_EDITOR_EVENT,
+      onEnterLayoutEditor as EventListener
+    );
+    return () =>
+      window.removeEventListener(
+        DASHBOARD_ENTER_LAYOUT_EDITOR_EVENT,
+        onEnterLayoutEditor as EventListener
+      );
+  }, []);
+
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent<LayoutEditorState>(DASHBOARD_LAYOUT_EDITOR_STATE_UPDATED_EVENT, {
+        detail: { isEditing: editMode },
+      })
+    );
+  }, [editMode]);
 
   const openLayoutSettingsModal = () => {
     setLayoutSettingsSnapshot(cloneConfig(layoutConfig));
@@ -1148,7 +1074,7 @@ export default function TileLayout() {
               <button type="button" className="btn-primary text-xs" onClick={saveAndExitEditor}>Save & exit</button>
             </>
           )}
-          {!editMode && <button type="button" onClick={() => setEditMode(true)} className="btn-ghost text-xs">Customize layout</button>}
+          {!editMode && showCustomizeButton && <button type="button" onClick={() => setEditMode(true)} className="btn-ghost text-xs">Customize layout</button>}
         </div>
       </div>
 
@@ -1348,7 +1274,7 @@ export default function TileLayout() {
                 }}>
                 {editMode && !compactEditControls && <div className="absolute top-2 left-2 z-20 text-[10px] px-2 py-0.5 rounded-full bg-black/5 dark:bg-white/10 text-gray-600/80 dark:text-white/70">{def.label}</div>}
 
-                <div className={`h-full min-h-0 overflow-hidden ${editMode && compactEditControls ? "pt-11" : ""}`}>
+                <div className={`h-full min-h-0 ${editMode ? "overflow-hidden" : "overflow-visible"} ${editMode && compactEditControls ? "pt-11" : ""}`}>
                   {dragging?.id === tile.id ? (
                     <div className="h-full rounded-2xl border-2 border-dashed border-blue-500/45 dark:border-blue-400/55 bg-blue-500/10 dark:bg-blue-400/15 relative animate-pulse">
                       <div className="absolute inset-0 flex items-center justify-center text-[11px] font-medium text-blue-600/75 dark:text-blue-300/75">Drop target</div>
@@ -1370,6 +1296,38 @@ export default function TileLayout() {
                       <EditButton title="Move up" icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>} onClick={() => moveTile(tile.id, -1)} />
                       <EditButton title="Move down" icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>} onClick={() => moveTile(tile.id, 1)} />
                       <EditButton title="Duplicate tile" icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h9a2 2 0 012 2v9m-3 3H7a2 2 0 01-2-2V10a2 2 0 012-2z" /></svg>} onClick={() => duplicateTile(tile)} />
+                      {tile.type === "weather" && (
+                        <button
+                          type="button"
+                          title="Weather settings"
+                          aria-label="Weather settings"
+                          onClick={(event) => {
+                            const target = event.currentTarget;
+                            const rect = target.getBoundingClientRect();
+                            window.dispatchEvent(
+                              new CustomEvent("weather:open-settings", {
+                                detail: {
+                                  tileId: tile.id,
+                                  top: rect.bottom + 8,
+                                  left: rect.right,
+                                },
+                              })
+                            );
+                          }}
+                          className="h-7 rounded-lg px-2 inline-flex items-center gap-1.5 transition-all duration-150 bg-black/[0.04] dark:bg-white/[0.08] text-gray-600/80 dark:text-white/70 hover:bg-black/[0.08] dark:hover:bg-white/[0.14]"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={1.7}
+                              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                            />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
+                          <span className="text-[10px] font-medium">Weather</span>
+                        </button>
+                      )}
                       {tile.type === "search" && (
                         <div
                           ref={(node) => {
@@ -1498,6 +1456,7 @@ export default function TileLayout() {
             <div className="h-full min-h-0 overflow-hidden">
               <TileContent
                 tile={{
+                  id: "__drag-preview__",
                   type: dragging.type,
                   colSpan: dragging.colSpan,
                   rowSpan: dragging.rowSpan,

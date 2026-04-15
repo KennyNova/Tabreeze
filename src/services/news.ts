@@ -3,6 +3,7 @@ export interface NewsItem {
   link: string;
   source: string;
   pubDate: string;
+  snippet?: string;
 }
 
 const CACHE_KEY = "dashboard-news-cache";
@@ -39,6 +40,11 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, "").trim();
 }
 
+function truncateText(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, maxLen - 1).trimEnd()}…`;
+}
+
 export async function fetchNews(): Promise<NewsItem[]> {
   const cached = getCached();
   if (cached) return cached.items;
@@ -63,13 +69,20 @@ export async function fetchNews(): Promise<NewsItem[]> {
     const linkEl = item.querySelector("link");
     const sourceEl = item.querySelector("source");
     const pubDateEl = item.querySelector("pubDate");
+    const descriptionEl = item.querySelector("description");
 
     if (titleEl?.textContent && linkEl?.textContent) {
+      const descriptionHtml = descriptionEl?.textContent ?? "";
+      const snippet = truncateText(
+        decodeHTMLEntities(stripHtml(descriptionHtml)),
+        220
+      );
       newsItems.push({
         title: decodeHTMLEntities(stripHtml(titleEl.textContent)),
         link: linkEl.textContent,
         source: sourceEl?.textContent || "Google News",
         pubDate: pubDateEl?.textContent || "",
+        snippet: snippet || undefined,
       });
     }
   });

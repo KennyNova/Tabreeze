@@ -10,6 +10,7 @@ interface BookmarkCardProps {
   onDelete?: (id: string) => void;
   isDragging?: boolean;
   isDragOver?: boolean;
+  showActions?: boolean;
 }
 
 /** Ordered candidates; Google often works, gstatic/ddg cover edge cases and CDNs. */
@@ -68,6 +69,7 @@ export default function BookmarkCard({
   onDelete,
   isDragging,
   isDragOver,
+  showActions = true,
 }: BookmarkCardProps) {
   const [showMenu, setShowMenu] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -122,11 +124,13 @@ export default function BookmarkCard({
   return (
     <div
       className="relative group"
-      onMouseLeave={() => setShowMenu(false)}
+      onMouseLeave={() => {
+        if (showActions) setShowMenu(false);
+      }}
       style={{
         opacity: isDragging ? 0.35 : 1,
         transition: "opacity 0.15s",
-        outline: isDragOver ? "2px solid rgba(0,122,255,0.4)" : "none",
+        outline: isDragOver ? "2px solid color-mix(in srgb, var(--theme-accent) 45%, transparent)" : "none",
         outlineOffset: "3px",
         borderRadius: "16px",
       }}
@@ -148,84 +152,105 @@ export default function BookmarkCard({
         ) : (
           <div
             className="w-10 h-10 rounded-xl flex items-center justify-center text-[15px] font-semibold
-                       bg-black/[0.06] dark:bg-white/[0.08] text-gray-500 dark:text-white/50"
+                       theme-text-secondary"
+            style={{ background: "color-mix(in srgb, var(--theme-surface-hover) 76%, transparent)" }}
             aria-hidden
           >
             {getInitialLetter(title, url)}
           </div>
         )}
-        <span className="text-[13px] font-medium text-gray-600/90 dark:text-white/60 text-center truncate w-full">
+        <span className="text-[13px] font-medium text-center truncate w-full theme-text-secondary">
           {title || getDomainName(url)}
         </span>
         {folderPath ? (
           <span
-            className="text-[10px] text-gray-400/80 dark:text-white/35 text-center truncate w-full -mt-1 max-w-full"
+            className="text-[10px] theme-text-secondary text-center truncate w-full -mt-1 max-w-full"
             title={folderPath}
+            style={{ opacity: 0.72 }}
           >
             {folderPath}
           </span>
         ) : null}
       </a>
 
-      {/* Drag handle */}
-      <div
-        className="absolute top-2 left-2 opacity-0 group-hover:opacity-100
-                   w-6 h-6 rounded-full flex items-center justify-center
-                   text-gray-400/50 dark:text-white/25 cursor-grab active:cursor-grabbing
-                   transition-all duration-200"
-        style={{ background: "rgba(0,0,0,0.04)" }}
-        title="Drag to reorder"
-      >
-        <svg className="w-3 h-3.5" viewBox="0 0 10 14" fill="currentColor">
-          <circle cx="3" cy="2"  r="1.2" />
-          <circle cx="7" cy="2"  r="1.2" />
-          <circle cx="3" cy="7"  r="1.2" />
-          <circle cx="7" cy="7"  r="1.2" />
-          <circle cx="3" cy="12" r="1.2" />
-          <circle cx="7" cy="12" r="1.2" />
-        </svg>
-      </div>
+      {showActions ? (
+        <div
+          className="absolute top-2 left-2 opacity-0 group-hover:opacity-100
+                     w-6 h-6 rounded-full flex items-center justify-center
+                     cursor-grab active:cursor-grabbing
+                     transition-all duration-200"
+          style={{
+            color: "var(--theme-text-secondary)",
+            background: "color-mix(in srgb, var(--theme-surface-hover) 72%, transparent)",
+          }}
+          title="Drag to reorder"
+        >
+          <svg className="w-3 h-3.5" viewBox="0 0 10 14" fill="currentColor">
+            <circle cx="3" cy="2"  r="1.2" />
+            <circle cx="7" cy="2"  r="1.2" />
+            <circle cx="3" cy="7"  r="1.2" />
+            <circle cx="7" cy="7"  r="1.2" />
+            <circle cx="3" cy="12" r="1.2" />
+            <circle cx="7" cy="12" r="1.2" />
+          </svg>
+        </div>
+      ) : null}
 
-      <button
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          setShowMenu(!showMenu);
-        }}
-        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100
-                   w-6 h-6 rounded-full flex items-center justify-center
-                   text-gray-400/60 dark:text-white/30
-                   transition-all duration-200"
-        style={{ background: "rgba(0,0,0,0.04)" }}
-      >
-        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-          <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z" />
-        </svg>
-      </button>
+      {showActions ? (
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setShowMenu(!showMenu);
+          }}
+          className="absolute top-2 right-2 opacity-0 group-hover:opacity-100
+                     w-6 h-6 rounded-full flex items-center justify-center
+                     transition-all duration-200"
+          style={{
+            color: "var(--theme-text-secondary)",
+            background: "color-mix(in srgb, var(--theme-surface-hover) 72%, transparent)",
+          }}
+        >
+          <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z" />
+          </svg>
+        </button>
+      ) : null}
 
-      {showMenu && (
+      {showActions && showMenu && (
         <div className="absolute top-8 right-2 z-20 glass py-1 min-w-[100px]"
-             style={{ background: "rgba(255,255,255,0.8)", backdropFilter: "blur(40px)" }}>
+             style={{ background: "color-mix(in srgb, var(--theme-surface) 90%, transparent)", backdropFilter: "blur(40px)" }}>
           <button
             onClick={(e) => {
               e.preventDefault();
               setShowMenu(false);
               setEditing(true);
             }}
-            className="w-full px-3 py-1.5 text-left text-sm text-gray-600/90 dark:text-white/70
-                       hover:bg-black/[0.03] dark:hover:bg-white/[0.06] transition-colors"
+            className="w-full px-3 py-1.5 text-left text-sm transition-colors"
+            style={{ color: "var(--theme-text-secondary)" }}
+            onMouseEnter={(event) => {
+              event.currentTarget.style.background = "color-mix(in srgb, var(--theme-surface-hover) 78%, transparent)";
+            }}
+            onMouseLeave={(event) => {
+              event.currentTarget.style.background = "transparent";
+            }}
           >
             Edit
           </button>
-          <div className="mx-2 border-t border-black/[0.05] dark:border-white/[0.06]" />
+          <div className="mx-2 border-t" style={{ borderColor: "color-mix(in srgb, var(--theme-border) 60%, transparent)" }} />
           <button
             onClick={(e) => {
               e.preventDefault();
               setShowMenu(false);
               if (id && onDelete) onDelete(id);
             }}
-            className="w-full px-3 py-1.5 text-left text-sm text-red-500/80 dark:text-red-400/70
-                       hover:bg-black/[0.03] dark:hover:bg-white/[0.06] transition-colors"
+            className="w-full px-3 py-1.5 text-left text-sm text-red-500/85 transition-colors"
+            onMouseEnter={(event) => {
+              event.currentTarget.style.background = "color-mix(in srgb, var(--theme-surface-hover) 78%, transparent)";
+            }}
+            onMouseLeave={(event) => {
+              event.currentTarget.style.background = "transparent";
+            }}
           >
             Delete
           </button>

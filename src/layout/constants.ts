@@ -1,6 +1,7 @@
 import type { LayoutConfigV2, TileItem } from "./types";
 
 export const LAYOUT_CONFIG_V2_KEY = "dashboard-layout-config-v2";
+export const LAYOUT_SIDE_SLOTS_UPDATED_EVENT = "layout:side-slots-updated";
 
 /** Legacy v1 keys — migrated once into v2 */
 export const LEGACY_TILE_LAYOUT_KEY = "dashboard-tile-layout-v1";
@@ -41,6 +42,10 @@ export function createDefaultLayoutConfigV2(): LayoutConfigV2 {
     custom: {
       profiles: [],
       selectedProfileId: null,
+    },
+    sideSlots: {
+      left: { widget: null },
+      right: { widget: null },
     },
   };
 }
