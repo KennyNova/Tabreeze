@@ -12,6 +12,7 @@ import {
   isDarkTheme,
   loadTheme,
   loadThemeAutomationSettings,
+  randomizeTheme,
   resolveSunThemeTimes,
   saveTheme,
   saveThemeAutomationSettings,
@@ -25,6 +26,15 @@ import {
   type ThemeSettingsSelectablePreset,
   type ThemeTokens,
 } from "./settings/themeTokens";
+import OnboardingWizard from "./components/onboarding/OnboardingWizard";
+import {
+  loadOnboardingDraft,
+  loadOnboardingState,
+  ONBOARDING_STATE_UPDATED_EVENT,
+  resetOnboardingProgress,
+  resumeOnboardingFromSettings,
+  shouldAutoOpenOnboarding,
+} from "./settings/onboarding";
 
 const VIDEO_WALLPAPER_EXTENSIONS = [".mp4", ".webm", ".ogg", ".ogv", ".mov", ".m4v"];
 
@@ -39,6 +49,8 @@ export default function App() {
   const [wallpaper, setWallpaper] = useState<string>("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sideSlots, setSideSlots] = useState<SideWidgetSlots>(() => loadLayoutConfig(widgetConstraints).sideSlots);
+  const [wizardOpen, setWizardOpen] = useState<boolean>(() => shouldAutoOpenOnboarding());
+  const [layoutRefreshKey, setLayoutRefreshKey] = useState(0);
 
   useEffect(() => {
     const savedWallpaper = localStorage.getItem("dashboard-wallpaper");
@@ -157,6 +169,19 @@ export default function App() {
     };
   }, [themeAutomation, theme.preset]);
 
+  useEffect(() => {
+    const onOnboardingStateChanged = () => {
+      const state = loadOnboardingState();
+      if (state.completed) {
+        setWizardOpen(false);
+      }
+    };
+    window.addEventListener(ONBOARDING_STATE_UPDATED_EVENT, onOnboardingStateChanged);
+    return () => {
+      window.removeEventListener(ONBOARDING_STATE_UPDATED_EVENT, onOnboardingStateChanged);
+    };
+  }, []);
+
   const hasWallpaper = !!wallpaper;
   const wallpaperIsVideo = hasWallpaper && isVideoWallpaper(wallpaper);
   const applyWallpaper = (url: string) => {
@@ -176,6 +201,23 @@ export default function App() {
       return next;
     });
   };
+
+  const refreshDashboardWidgets = () => {
+    setLayoutRefreshKey((prev) => prev + 1);
+  };
+
+  const openWizardFromSettings = (restart = false) => {
+    if (restart) {
+      resetOnboardingProgress();
+    } else {
+      resumeOnboardingFromSettings();
+    }
+    setSettingsOpen(false);
+    setWizardOpen(true);
+  };
+
+  const hasOnboardingDraft = Boolean(loadOnboardingDraft());
+  const onboardingState = loadOnboardingState();
 
   return (
     <div className="min-h-screen relative transition-colors duration-500">
@@ -242,7 +284,7 @@ export default function App() {
 
         {/* Tile-based customizable dashboard */}
         <div className="animate-in delay-2">
-          <TileLayout />
+          <TileLayout key={layoutRefreshKey} />
         </div>
       </div>
 
@@ -260,6 +302,22 @@ export default function App() {
         onThemeChange={handleThemeChange}
         themeAutomation={themeAutomation}
         onThemeAutomationChange={setThemeAutomation}
+        onWallpaperChange={applyWallpaper}
+        hasOnboardingDraft={hasOnboardingDraft}
+        onboardingCompleted={onboardingState.completed}
+        onContinueSetupWizard={() => openWizardFromSettings(false)}
+        onOpenSetupWizard={() => openWizardFromSettings(false)}
+        onRestartSetupWizard={() => openWizardFromSettings(true)}
+      />
+      <OnboardingWizard
+        open={wizardOpen}
+        theme={theme}
+        onClose={() => setWizardOpen(false)}
+        onRefreshDashboard={refreshDashboardWidgets}
+        onApplyThemePreset={applySettingsPreset}
+        onThemeTokenChange={handleThemeTokenChange}
+        onThemeLockToggle={handleThemeLockToggle}
+        onThemeRandomize={() => setTheme((prev) => randomizeTheme(prev))}
         onWallpaperChange={applyWallpaper}
       />
     </div>

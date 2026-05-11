@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
 import {
   DASHBOARD_ENTER_LAYOUT_EDITOR_EVENT,
@@ -11,12 +11,15 @@ import {
 } from "../settings/dashboardSettings";
 import ThemeSwatchPanel from "./ThemeSwatchPanel";
 import {
+  loadTheme,
+  loadThemeAutomationSettings,
   randomizeTheme,
   type ThemeAutomationMode,
   type ThemeAutomationSettings,
   type ThemeState,
 } from "../settings/themeStore";
 import type { ThemeSettingsSelectablePreset, ThemeTokens } from "../settings/themeTokens";
+import { downloadSettingsBackup, importThemeFromBackupFile } from "../settings/backup";
 
 interface SettingsModalProps {
   open: boolean;
@@ -30,6 +33,11 @@ interface SettingsModalProps {
   themeAutomation: ThemeAutomationSettings;
   onThemeAutomationChange: (settings: ThemeAutomationSettings) => void;
   onWallpaperChange: (url: string) => void;
+  hasOnboardingDraft: boolean;
+  onboardingCompleted: boolean;
+  onContinueSetupWizard: () => void;
+  onOpenSetupWizard: () => void;
+  onRestartSetupWizard: () => void;
 }
 
 const WALLPAPER_PRESETS = [
@@ -53,16 +61,43 @@ export default function SettingsModal({
   themeAutomation,
   onThemeAutomationChange,
   onWallpaperChange,
+  hasOnboardingDraft,
+  onboardingCompleted,
+  onContinueSetupWizard,
+  onOpenSetupWizard,
+  onRestartSetupWizard,
 }: SettingsModalProps) {
   const [customUrl, setCustomUrl] = useState("");
   const [dashboardSettings, setDashboardSettings] = useState<DashboardSettings>(() => loadDashboardSettings());
   const [sideDrawerSettings, setSideDrawerSettings] = useState<SideDrawerUiSettings>(() => loadSideDrawerUiSettings());
+  const [backupStatus, setBackupStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setDashboardSettings(loadDashboardSettings());
     setSideDrawerSettings(loadSideDrawerUiSettings());
+    setBackupStatus(null);
   }, [open]);
+
+  const handleThemeImport = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      const appliedCount = await importThemeFromBackupFile(file);
+      onThemeChange(loadTheme());
+      onThemeAutomationChange(loadThemeAutomationSettings());
+      setBackupStatus({
+        type: "success",
+        message: `Imported theme settings (${appliedCount} key${appliedCount === 1 ? "" : "s"}).`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not import theme settings.";
+      setBackupStatus({ type: "error", message });
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -374,6 +409,94 @@ export default function SettingsModal({
                 <span>Blur backdrop when drawer is open</span>
                 <span>{sideDrawerSettings.blurBackdrop ? "On" : "Off"}</span>
               </button>
+            </div>
+          </section>
+
+          <section className="glass p-4 rounded-2xl">
+            <h3 className="text-sm font-semibold theme-text mb-3">Setup Wizard</h3>
+            <p className="text-[11px] theme-text-secondary mb-3">
+              Reopen Tabreeze setup anytime. Save and exit from the wizard keeps your progress for later.
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              {hasOnboardingDraft && !onboardingCompleted ? (
+                <button type="button" className="btn-primary text-xs" onClick={onContinueSetupWizard}>
+                  Continue setup wizard
+                </button>
+              ) : (
+                <button type="button" className="btn-primary text-xs" onClick={onOpenSetupWizard}>
+                  Open setup wizard
+                </button>
+              )}
+              <button
+                type="button"
+                className="text-xs px-3 py-1.5 rounded-xl transition-colors"
+                style={{
+                  background: "color-mix(in srgb, var(--theme-surface-hover) 75%, transparent)",
+                  color: "var(--theme-text)",
+                  border: "1px solid color-mix(in srgb, var(--theme-border) 72%, transparent)",
+                }}
+                onClick={onRestartSetupWizard}
+              >
+                Restart wizard
+              </button>
+            </div>
+          </section>
+
+          <section className="glass p-4 rounded-2xl">
+            <h3 className="text-sm font-semibold theme-text mb-3">Backup</h3>
+            <p className="text-[11px] theme-text-secondary mb-3">
+              Export everything stored for this dashboard (tile layout and breakpoints, side widgets, bookmarks,
+              tasks, theme, wallpaper, widget data, and caches) as a JSON file for backup or transfer.
+            </p>
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    const filename = downloadSettingsBackup();
+                    setBackupStatus({ type: "success", message: `Exported as ${filename}` });
+                  } catch {
+                    setBackupStatus({
+                      type: "error",
+                      message: "Could not export settings. Please try again.",
+                    });
+                  }
+                }}
+                className="btn-primary text-xs"
+              >
+                Export settings
+              </button>
+              <button
+                type="button"
+                onClick={() => importInputRef.current?.click()}
+                className="text-xs px-3 py-1.5 rounded-xl transition-colors"
+                style={{
+                  background: "color-mix(in srgb, var(--theme-surface-hover) 75%, transparent)",
+                  color: "var(--theme-text)",
+                  border: "1px solid color-mix(in srgb, var(--theme-border) 72%, transparent)",
+                }}
+              >
+                Import theme
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json,.json"
+                onChange={handleThemeImport}
+                className="hidden"
+              />
+              <span
+                className="text-[11px]"
+                style={{
+                  color:
+                    backupStatus?.type === "error"
+                      ? "color-mix(in srgb, #ef4444 78%, var(--theme-text))"
+                      : "var(--theme-text-secondary)",
+                }}
+              >
+                {backupStatus?.message ??
+                  "Full export includes all dashboard local data. Import theme applies only colors and day/night automation from a backup file."}
+              </span>
             </div>
           </section>
         </div>

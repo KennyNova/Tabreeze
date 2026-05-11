@@ -97,6 +97,79 @@
   }
 }
 
+@keyframes onboardingOrbFloat {
+  0% {
+    transform: translate3d(var(--start-x), var(--start-y), 0) scale(0.95);
+  }
+  25% {
+    transform: translate3d(calc(var(--start-x) + var(--travel-x)), calc(var(--start-y) - var(--travel-y)), 0) scale(1.03);
+  }
+  50% {
+    transform: translate3d(calc(var(--start-x) - var(--travel-x) * 0.5), calc(var(--start-y) + var(--travel-y) * 0.6), 0)
+      scale(0.9);
+  }
+  75% {
+    transform: translate3d(calc(var(--start-x) + var(--travel-x) * 0.7), calc(var(--start-y) + var(--travel-y)), 0) scale(1.08);
+  }
+  100% {
+    transform: translate3d(var(--start-x), var(--start-y), 0) scale(0.95);
+  }
+}
+
+@keyframes onboardingOrbGlow {
+  0%,
+  100% {
+    opacity: 0.35;
+    filter: blur(1px) saturate(1);
+  }
+  50% {
+    opacity: 0.72;
+    filter: blur(0px) saturate(1.18);
+  }
+}
+
+@keyframes onboardingTitleType {
+  from {
+    width: 0;
+  }
+  to {
+    width: 8.3ch;
+  }
+}
+
+@keyframes onboardingTitleSwoop {
+  0% {
+    top: 50%;
+    transform: translate(-50%, -50%) scale(1.14);
+    opacity: 0;
+    letter-spacing: 0.02em;
+  }
+  20% {
+    opacity: 1;
+  }
+  72% {
+    top: 50%;
+    transform: translate(-50%, -50%) scale(1.06);
+  }
+  100% {
+    top: 18px;
+    transform: translate(-50%, 0) scale(0.84);
+    opacity: 1;
+    letter-spacing: -0.015em;
+  }
+}
+
+@keyframes onboardingWelcomeContentIn {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @layer components {
   .theme-text {
     color: var(--theme-text);
@@ -252,6 +325,186 @@
   .weather-forecast-icon {
     display: inline-block;
     animation: forecastIconPop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+
+  .onboarding-ambient-backdrop {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    background:
+      radial-gradient(120% 100% at 50% 100%, color-mix(in srgb, var(--theme-bg) 85%, #000 15%), transparent 72%),
+      color-mix(in srgb, var(--theme-bg) 55%, #000 45%);
+  }
+
+  .onboarding-ambient-backdrop::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(
+        165deg,
+        color-mix(in srgb, var(--theme-surface) 44%, transparent),
+        color-mix(in srgb, var(--theme-surface) 14%, transparent)
+      );
+    pointer-events: none;
+  }
+
+  .onboarding-orb {
+    --size: 280px;
+    --start-x: 0px;
+    --start-y: 0px;
+    --travel-x: 120px;
+    --travel-y: 90px;
+    --duration: 18s;
+    --delay: 0s;
+    position: absolute;
+    width: var(--size);
+    height: var(--size);
+    border-radius: 999px;
+    pointer-events: none;
+    background: radial-gradient(circle at 30% 30%, color-mix(in srgb, var(--orb-color) 68%, white 18%), transparent 72%);
+    box-shadow:
+      0 0 80px color-mix(in srgb, var(--orb-color) 65%, transparent),
+      0 0 160px color-mix(in srgb, var(--orb-color) 35%, transparent);
+    animation:
+      onboardingOrbFloat var(--duration) ease-in-out infinite var(--delay),
+      onboardingOrbGlow calc(var(--duration) * 0.52) ease-in-out infinite var(--delay);
+    filter: blur(12px);
+    will-change: transform, opacity, filter;
+  }
+
+  .onboarding-glass-pane-fullscreen {
+    background: color-mix(in srgb, var(--theme-surface) 22%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-border) 35%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in srgb, white 16%, transparent);
+    backdrop-filter: blur(34px) saturate(1.08);
+  }
+
+  .onboarding-welcome-stage {
+    position: relative;
+    min-height: 60vh;
+    padding-top: 72px;
+  }
+
+  .onboarding-welcome-title-wrap {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    animation: onboardingTitleSwoop 1.75s cubic-bezier(0.2, 0.72, 0.16, 1) 0.14s forwards;
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  .onboarding-welcome-title-text {
+    display: inline-block;
+    width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: clamp(3.5rem, 11vw, 8rem);
+    line-height: 0.95;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: color-mix(in srgb, var(--theme-text) 94%, white 6%);
+    text-shadow:
+      0 0 24px color-mix(in srgb, var(--theme-accent) 22%, transparent),
+      0 2px 28px color-mix(in srgb, #000 20%, transparent);
+    border-right: 2px solid color-mix(in srgb, var(--theme-accent) 60%, transparent);
+    animation: onboardingTitleType 0.92s steps(8, end) 0.3s forwards;
+  }
+
+  .onboarding-welcome-content {
+    opacity: 0;
+    animation: onboardingWelcomeContentIn 0.8s cubic-bezier(0.2, 0.72, 0.16, 1) 1.5s forwards;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .onboarding-welcome-title-wrap,
+    .onboarding-welcome-title-text,
+    .onboarding-welcome-content {
+      animation: none;
+    }
+
+    .onboarding-welcome-title-wrap {
+      position: static;
+      transform: none;
+      margin-bottom: 12px;
+    }
+
+    .onboarding-welcome-title-text {
+      width: auto;
+      border-right: none;
+      font-size: clamp(2.5rem, 8vw, 5rem);
+    }
+
+    .onboarding-welcome-content {
+      opacity: 1;
+    }
+  }
+
+  .onboarding-orb--1 {
+    --orb-color: var(--onboarding-orb-1, #2bb8c3);
+    --size: 340px;
+    --start-x: 6vw;
+    --start-y: 8vh;
+    --travel-x: 180px;
+    --travel-y: 120px;
+    --duration: 22s;
+  }
+
+  .onboarding-orb--2 {
+    --orb-color: var(--onboarding-orb-2, #5fd5d0);
+    --size: 280px;
+    --start-x: 62vw;
+    --start-y: 10vh;
+    --travel-x: 130px;
+    --travel-y: 150px;
+    --duration: 20s;
+    --delay: -6s;
+  }
+
+  .onboarding-orb--3 {
+    --orb-color: var(--onboarding-orb-3, #24a6b6);
+    --size: 250px;
+    --start-x: 14vw;
+    --start-y: 56vh;
+    --travel-x: 160px;
+    --travel-y: 110px;
+    --duration: 24s;
+    --delay: -9s;
+  }
+
+  .onboarding-orb--4 {
+    --orb-color: var(--onboarding-orb-4, #e8754d);
+    --size: 210px;
+    --start-x: 76vw;
+    --start-y: 60vh;
+    --travel-x: 120px;
+    --travel-y: 90px;
+    --duration: 19s;
+    --delay: -5s;
+  }
+
+  .onboarding-orb--5 {
+    --orb-color: var(--onboarding-orb-5, #f29d65);
+    --size: 180px;
+    --start-x: 42vw;
+    --start-y: 68vh;
+    --travel-x: 110px;
+    --travel-y: 70px;
+    --duration: 16s;
+    --delay: -2s;
+  }
+
+  .onboarding-orb--6 {
+    --orb-color: var(--onboarding-orb-6, #58c7c7);
+    --size: 240px;
+    --start-x: 36vw;
+    --start-y: 20vh;
+    --travel-x: 140px;
+    --travel-y: 100px;
+    --duration: 21s;
+    --delay: -11s;
   }
 }
 

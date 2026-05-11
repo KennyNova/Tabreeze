@@ -6,12 +6,66 @@ export interface NewsItem {
   snippet?: string;
 }
 
+export interface NewsSourceDefinition {
+  id: string;
+  label: string;
+  rssUrl: string;
+}
+
+export const NEWS_SOURCE_KEY = "dashboard-news-source-v1";
+export const NEWS_CUSTOM_SOURCE_ID = "custom-rss";
+export const NEWS_CUSTOM_RSS_KEY = "dashboard-news-custom-rss-v1";
+export const NEWS_SOURCES: NewsSourceDefinition[] = [
+  { id: "google-top", label: "Google Top Stories", rssUrl: "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en" },
+  { id: "google-tech", label: "Google Technology", rssUrl: "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en" },
+  { id: "google-business", label: "Google Business", rssUrl: "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-US&gl=US&ceid=US:en" },
+  { id: "google-world", label: "Google World", rssUrl: "https://news.google.com/rss/headlines/section/topic/WORLD?hl=en-US&gl=US&ceid=US:en" },
+  { id: NEWS_CUSTOM_SOURCE_ID, label: "Custom RSS Feed", rssUrl: "" },
+];
+
 const CACHE_KEY = "dashboard-news-cache";
 const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes
 
 interface CachedNews {
   items: NewsItem[];
   timestamp: number;
+  sourceKey: string;
+}
+
+function getSelectedNewsSourceId(): string {
+  const raw = localStorage.getItem(NEWS_SOURCE_KEY);
+  return NEWS_SOURCES.some((source) => source.id === raw) ? (raw as string) : NEWS_SOURCES[0].id;
+}
+
+function loadCustomRssUrl(): string {
+  const raw = localStorage.getItem(NEWS_CUSTOM_RSS_KEY);
+  if (!raw) return "";
+  const value = raw.trim();
+  if (!value) return "";
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function getSelectedNewsFeed(): { rssUrl: string; sourceKey: string } {
+  const sourceId = getSelectedNewsSourceId();
+  if (sourceId === NEWS_CUSTOM_SOURCE_ID) {
+    const customUrl = loadCustomRssUrl();
+    if (customUrl) {
+      return {
+        rssUrl: customUrl,
+        sourceKey: `${NEWS_CUSTOM_SOURCE_ID}:${customUrl}`,
+      };
+    }
+  }
+  const source = NEWS_SOURCES.find((item) => item.id === sourceId && item.rssUrl) ?? NEWS_SOURCES[0];
+  return {
+    rssUrl: source.rssUrl,
+    sourceKey: `${source.id}:${source.rssUrl}`,
+  };
 }
 
 function getCached(): CachedNews | null {
@@ -20,6 +74,7 @@ function getCached(): CachedNews | null {
     if (!raw) return null;
     const cached: CachedNews = JSON.parse(raw);
     if (Date.now() - cached.timestamp > CACHE_DURATION) return null;
+    if (cached.sourceKey !== getSelectedNewsFeed().sourceKey) return null;
     return cached;
   } catch {
     return null;
@@ -27,7 +82,11 @@ function getCached(): CachedNews | null {
 }
 
 function setCache(items: NewsItem[]) {
-  localStorage.setItem(CACHE_KEY, JSON.stringify({ items, timestamp: Date.now() }));
+  const selectedFeed = getSelectedNewsFeed();
+  localStorage.setItem(
+    CACHE_KEY,
+    JSON.stringify({ items, timestamp: Date.now(), sourceKey: selectedFeed.sourceKey })
+  );
 }
 
 function decodeHTMLEntities(text: string): string {
@@ -49,7 +108,8 @@ export async function fetchNews(): Promise<NewsItem[]> {
   const cached = getCached();
   if (cached) return cached.items;
 
-  const rssUrl = "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en";
+  const selectedFeed = getSelectedNewsFeed();
+  const rssUrl = selectedFeed.rssUrl;
   const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(rssUrl)}`;
 
   const response = await fetch(proxyUrl);

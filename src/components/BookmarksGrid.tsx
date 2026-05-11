@@ -2,6 +2,11 @@ import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import BookmarkCard from "./BookmarkCard";
 import { LAYOUT_CONFIG_V2_KEY } from "../layout/constants";
+import {
+  BOOKMARKS_SYNC_UPDATED_EVENT,
+  collectBookmarksForScope,
+  loadBookmarkSyncScope,
+} from "../settings/bookmarksSync";
 
 const MAX_CHROME_BOOKMARKS = 48;
 const PRELOAD_FOLDER_LINK_LIMIT = 8;
@@ -195,6 +200,27 @@ export default function BookmarksGrid({ filter = "", isSidebar = false }: Bookma
   const preconnectedHostsRef = useRef(new Set<string>());
   const activeFolderPanelRef = useRef<HTMLDivElement | null>(null);
 
+  const reloadFromChrome = (order: string[]) => {
+    if (typeof chrome === "undefined" || !chrome.bookmarks) {
+      setBookmarks(applyOrder(loadCustomBookmarks(), order));
+      setSource("custom");
+      return;
+    }
+
+    chrome.bookmarks.getTree((tree) => {
+      const scope = loadBookmarkSyncScope();
+      const { folders, looseBookmarks } = collectBookmarksForScope(tree, scope);
+      if (scope || folders.length > 0 || looseBookmarks.length > 0) {
+        setChromeFolders(folders);
+        setChromeLoose(looseBookmarks);
+        setSource("chrome");
+        return;
+      }
+      setBookmarks(applyOrder(loadCustomBookmarks(), order));
+      setSource("custom");
+    });
+  };
+
   useEffect(() => {
     const mediaQuery =
       typeof window !== "undefined" && typeof window.matchMedia === "function"
@@ -216,22 +242,12 @@ export default function BookmarksGrid({ filter = "", isSidebar = false }: Bookma
 
   useEffect(() => {
     const order = loadBookmarkOrder();
-    if (typeof chrome !== "undefined" && chrome.bookmarks) {
-      chrome.bookmarks.getTree((tree) => {
-        const { folders, looseBookmarks } = collectBarData(tree);
-        if (folders.length > 0 || looseBookmarks.length > 0) {
-          setChromeFolders(folders);
-          setChromeLoose(looseBookmarks);
-          setSource("chrome");
-          return;
-        }
-        setBookmarks(applyOrder(loadCustomBookmarks(), order));
-        setSource("custom");
-      });
-    } else {
-      setBookmarks(applyOrder(loadCustomBookmarks(), order));
-      setSource("custom");
-    }
+    const onRefresh = () => reloadFromChrome(order);
+    onRefresh();
+    window.addEventListener(BOOKMARKS_SYNC_UPDATED_EVENT, onRefresh);
+    return () => {
+      window.removeEventListener(BOOKMARKS_SYNC_UPDATED_EVENT, onRefresh);
+    };
   }, []);
 
   const normalizedFilter = filter.trim().toLowerCase();

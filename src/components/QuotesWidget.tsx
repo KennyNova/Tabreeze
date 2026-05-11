@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { quoteCategories, Quote, QuoteCategory } from "../data/quotes";
 import { fetchNews, formatTimeAgo, NewsItem } from "../services/news";
+import { loadQuotesDefaultMode, saveQuotesDefaultMode } from "../settings/quotesMode";
 
 const CATEGORY_KEY = "dashboard-quote-category";
 const QUOTE_INDEX_KEY = "dashboard-quote-index";
@@ -37,7 +38,7 @@ function getDailyQuote(category: QuoteCategory): { quote: Quote; index: number }
 }
 
 export default function QuotesWidget() {
-  const [mode, setMode] = useState<Mode>("quotes");
+  const [mode, setMode] = useState<Mode>(() => loadQuotesDefaultMode());
   const [categoryId, setCategoryId] = useState(loadSavedCategory);
   const [showPicker, setShowPicker] = useState(false);
   const [currentQuote, setCurrentQuote] = useState<Quote | null>(null);
@@ -71,6 +72,10 @@ export default function QuotesWidget() {
   useEffect(() => {
     if (mode === "news") loadNews();
   }, [mode, loadNews]);
+
+  useEffect(() => {
+    saveQuotesDefaultMode(mode);
+  }, [mode]);
 
   useEffect(() => {
     if (!showPicker) return;

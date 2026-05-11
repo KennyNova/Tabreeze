@@ -3,7 +3,7 @@
   "name": "Tabreeze",
   "version": "1.0.0",
   "description": "A beautiful productivity dashboard for your new tab page with bookmarks, tasks, calendar, and weather.",
-  "permissions": ["bookmarks", "storage"],
+  "permissions": ["bookmarks", "search"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "chrome_url_overrides": {
     "newtab": "index.html"

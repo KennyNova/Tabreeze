@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { WidgetType } from "../layout/types";
-import { buildSearchUrl, getAvailableSearchSources, loadCustomSearchSources, resolveSearchSource } from "../search/sources";
+import { executeDashboardSearch } from "../search/executeSearch";
+import { getAvailableSearchSources, loadCustomSearchSources, resolveSearchSource } from "../search/sources";
 import { fetchWeather, getAqiLabel, getWeatherDescription, getWeatherIcon, getWeatherSettings } from "../services/weather";
 import type { WeatherData } from "../services/weather";
 import { fetchNews, formatTimeAgo, type NewsItem } from "../services/news";
@@ -70,7 +71,7 @@ function SideSearchPanel({ side }: { side: "left" | "right" }) {
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" /></svg>
                 </button>
               </div>
-              <form onSubmit={(e) => { e.preventDefault(); const q = (queries[String(idx)] ?? "").trim(); if (q) window.location.href = buildSearchUrl(src.urlTemplate, q); }} className="flex gap-2">
+              <form onSubmit={(e) => { e.preventDefault(); const q = (queries[String(idx)] ?? "").trim(); if (q) void executeDashboardSearch(q, src); }} className="flex gap-2">
                 <input value={queries[String(idx)] ?? ""} onChange={(e) => setQueries((p) => ({ ...p, [String(idx)]: e.target.value }))} placeholder={`Ask ${src.label}...`} className="input-field text-sm !py-2" />
                 <button type="submit" className="btn-primary text-xs px-3 py-2">Go</button>
               </form>

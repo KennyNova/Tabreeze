@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import { buildSearchUrl, resolveSearchSource } from "../search/sources";
+import { executeDashboardSearch } from "../search/executeSearch";
+import { resolveSearchSource } from "../search/sources";
 import SearchSourceLogo from "../search/SearchSourceLogo";
 
 interface SearchBarProps {
@@ -25,9 +26,7 @@ export default function SearchBar({ sourceId = "chatgpt" }: SearchBarProps) {
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = query.trim();
-    if (trimmed) {
-      window.location.href = buildSearchUrl(source.urlTemplate, trimmed);
-    }
+    if (trimmed) void executeDashboardSearch(trimmed, source);
   };
 
   return (
