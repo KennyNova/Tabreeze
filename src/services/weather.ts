@@ -58,10 +58,24 @@ const SETTINGS_KEY = "dashboard-weather-settings";
 const CACHE_DURATION_MS = 30 * 60 * 1000;
 const MOCK_WEATHER_KEY = "dashboard-weather-mock";
 
+function asFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 export function getWeatherSettings(): WeatherSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) return { unit: "C", ...JSON.parse(raw) };
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<WeatherSettings> | null;
+      const lat = asFiniteNumber(parsed?.customLat);
+      const lon = asFiniteNumber(parsed?.customLon);
+      return {
+        unit: parsed?.unit === "F" ? "F" : "C",
+        customLat: lat,
+        customLon: lon,
+        customCity: typeof parsed?.customCity === "string" ? parsed.customCity : undefined,
+      };
+    }
   } catch {}
   return { unit: "C" };
 }
@@ -266,13 +280,20 @@ export async function searchCity(query: string): Promise<GeocodingResult[]> {
     );
     if (!res.ok) return [];
     const data = await res.json();
-    return (data.results || []).map((r: any) => ({
-      name: r.name,
-      country: r.country,
-      admin1: r.admin1,
-      latitude: r.latitude,
-      longitude: r.longitude,
-    }));
+    return (data.results || [])
+      .map((r: any) => {
+        const latitude = Number(r.latitude);
+        const longitude = Number(r.longitude);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+        return {
+          name: String(r.name ?? ""),
+          country: String(r.country ?? ""),
+          admin1: typeof r.admin1 === "string" ? r.admin1 : undefined,
+          latitude,
+          longitude,
+        } satisfies GeocodingResult;
+      })
+      .filter((result: GeocodingResult | null): result is GeocodingResult => Boolean(result?.name && result.country));
   } catch {
     return [];
   }

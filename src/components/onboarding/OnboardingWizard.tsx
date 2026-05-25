@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import createGlobe from "cobe";
 import { widgetConstraints } from "../widgetRegistry";
 import ThemeSwatchPanel from "../ThemeSwatchPanel";
 import SearchSourceLogo from "../../search/SearchSourceLogo";
@@ -34,6 +33,7 @@ import {
 } from "../../settings/onboarding";
 import type { ThemeState } from "../../settings/themeStore";
 import type { ThemeSettingsSelectablePreset, ThemeTokens } from "../../settings/themeTokens";
+import OnboardingGlobe from "./OnboardingGlobe";
 import OnboardingWizardChrome from "./OnboardingWizardChrome";
 import OnboardingWizardProgressBar from "./OnboardingWizardProgressBar";
 
@@ -94,8 +94,8 @@ function getStepRail(answers: OnboardingAnswers): OnboardingStepId[] {
   const hasWidget = (widget: OnboardingWidgetId) => answers.selectedWidgets.includes(widget);
   const steps: OnboardingStepId[] = [
     "welcome",
-    "path",
     "widgetChoice",
+    "path",
     answers.path === "custom" ? "customLayout" : "presetLayout",
     "theme",
     "wallpaper",
@@ -115,6 +115,81 @@ function densityToPreset(density: OnboardingAnswers["customDensity"]): { preset:
   if (density === "comfortable") return { preset: "focus", cols: 10 };
   if (density === "dense") return { preset: "dense", cols: 12 };
   return { preset: "balanced", cols: 12 };
+}
+
+function liftLayoutToTop(layout: TileItem[]): TileItem[] {
+  if (layout.length === 0) return layout;
+  const minRowStart = layout.reduce((acc, tile) => Math.min(acc, tile.rowStart), Number.POSITIVE_INFINITY);
+  if (!Number.isFinite(minRowStart) || minRowStart <= 1) return layout.map((tile) => ({ ...tile }));
+  const delta = minRowStart - 1;
+  return layout.map((tile) => ({ ...tile, rowStart: Math.max(1, tile.rowStart - delta) }));
+}
+
+function withSingleWidgetFallback(tile: TileItem): TileItem {
+  const constraints = widgetConstraints[tile.type];
+  const expandedColSpan =
+    tile.type === "weather"
+      ? 12
+      : Math.max(constraints.minColSpan, Math.min(12, Math.max(constraints.defaultColSpan, 8)));
+  const expandedRowSpan =
+    tile.type === "weather"
+      ? Math.max(constraints.minRowSpan, Math.min(constraints.maxRowSpan, Math.max(tile.rowSpan, 2)))
+      : Math.max(constraints.minRowSpan, Math.min(constraints.maxRowSpan, Math.max(tile.rowSpan, constraints.defaultRowSpan)));
+
+  return {
+    ...tile,
+    colStart: 1,
+    rowStart: 1,
+    colSpan: expandedColSpan,
+    rowSpan: expandedRowSpan,
+  };
+}
+
+function withAdaptiveSpan(tile: TileItem, widgetCount: number): TileItem {
+  if (widgetCount <= 1) return withSingleWidgetFallback(tile);
+  const constraints = widgetConstraints[tile.type];
+  const minSpanByCount = widgetCount === 2 ? 6 : widgetCount === 3 ? 4 : constraints.minColSpan;
+  const colSpan = Math.max(
+    constraints.minColSpan,
+    Math.min(12, Math.min(constraints.maxColSpan, Math.max(tile.colSpan, minSpanByCount)))
+  );
+  const rowSpan =
+    tile.type === "weather" && widgetCount <= 2
+      ? Math.max(constraints.minRowSpan, Math.min(constraints.maxRowSpan, Math.max(tile.rowSpan, 2)))
+      : Math.max(constraints.minRowSpan, Math.min(constraints.maxRowSpan, tile.rowSpan));
+  return { ...tile, colSpan, rowSpan };
+}
+
+function compactPackTiles(layout: TileItem[]): TileItem[] {
+  if (layout.length <= 1) return layout.map((tile) => ({ ...tile }));
+  const placed: TileItem[] = [];
+  for (const tile of layout) {
+    const maxColStart = Math.max(1, 12 - tile.colSpan + 1);
+    let assigned: TileItem | null = null;
+    for (let row = 1; row <= 200 && !assigned; row += 1) {
+      for (let col = 1; col <= maxColStart; col += 1) {
+        const candidate: TileItem = { ...tile, colStart: col, rowStart: row };
+        const overlap = placed.some((other) => {
+          const candidateRight = candidate.colStart + candidate.colSpan - 1;
+          const candidateBottom = candidate.rowStart + candidate.rowSpan - 1;
+          const otherRight = other.colStart + other.colSpan - 1;
+          const otherBottom = other.rowStart + other.rowSpan - 1;
+          return !(
+            candidateRight < other.colStart ||
+            otherRight < candidate.colStart ||
+            candidateBottom < other.rowStart ||
+            otherBottom < candidate.rowStart
+          );
+        });
+        if (!overlap) {
+          assigned = candidate;
+          break;
+        }
+      }
+    }
+    placed.push(assigned ?? { ...tile, colStart: 1, rowStart: Math.max(1, tile.rowStart) });
+  }
+  return placed;
 }
 
 function inferThemeChoiceFromTheme(theme: ThemeState): OnboardingAnswers["themeChoice"] {
@@ -151,9 +226,7 @@ export default function OnboardingWizard({
   const [customWallpaperUrl, setCustomWallpaperUrl] = useState("");
   const [expandedFolderIds, setExpandedFolderIds] = useState<string[]>([]);
   const [hasVisitedReview, setHasVisitedReview] = useState(false);
-  const globeCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const globePointerIdRef = useRef<number | null>(null);
-  const globeLastPointerRef = useRef({ x: 0, y: 0 });
+  const [wizardError, setWizardError] = useState("");
   const globePhiRef = useRef(0);
   const globeThetaRef = useRef(0);
   const globeScaleRef = useRef(1.08);
@@ -168,6 +241,8 @@ export default function OnboardingWizard({
   const isLastStep = stepRail[stepRail.length - 1] === stepId;
   const isFiniteNumber = (value: number | undefined): value is number =>
     typeof value === "number" && Number.isFinite(value);
+  const formatCoordinate = (value: unknown): string =>
+    typeof value === "number" && Number.isFinite(value) ? value.toFixed(3) : "—";
 
   useEffect(() => {
     if (!open) return;
@@ -240,118 +315,6 @@ export default function OnboardingWizard({
     });
   }, [open, stepId]);
 
-  useEffect(() => {
-    if (!open || stepId !== "weather") return;
-    const canvas = globeCanvasRef.current;
-    if (!canvas) return;
-    let disposed = false;
-
-    const globe = createGlobe(canvas, {
-      devicePixelRatio: 2,
-      width: canvas.offsetWidth * 2,
-      height: canvas.offsetHeight * 2,
-      phi: globePhiRef.current,
-      theta: globeThetaRef.current,
-      dark: 1,
-      diffuse: 1.15,
-      mapSamples: 14000,
-      mapBrightness: 7,
-      baseColor: [0.12, 0.18, 0.2],
-      markerColor: [0.93, 0.46, 0.3],
-      glowColor: [0.74, 0.95, 1.0],
-      scale: globeScaleRef.current,
-    });
-
-    let frameId = 0;
-    const renderFrame = () => {
-      if (disposed) return;
-      try {
-        const width = Math.max(1, canvas.offsetWidth * 2);
-        const height = Math.max(1, canvas.offsetHeight * 2);
-        globe.update({
-          phi: globePhiRef.current,
-          theta: globeThetaRef.current,
-          scale: globeScaleRef.current,
-          width,
-          height,
-        });
-        frameId = window.requestAnimationFrame(renderFrame);
-      } catch {
-        disposed = true;
-      }
-    };
-    frameId = window.requestAnimationFrame(renderFrame);
-
-    const updateCenterCoordinates = () => {
-      const lon = Number((((-globePhiRef.current * 180) / Math.PI + 540) % 360 - 180).toFixed(4));
-      const lat = Number(Math.max(-85, Math.min(85, (-globeThetaRef.current * 180) / Math.PI)).toFixed(4));
-      setAnswers((prev) => ({
-        ...prev,
-        weather: {
-          ...prev.weather,
-          customLat: lat,
-          customLon: lon,
-          customCity: prev.weather.customCity || "Pinned location",
-        },
-      }));
-    };
-
-    const onPointerDown = (event: PointerEvent) => {
-      globePointerIdRef.current = event.pointerId;
-      globeLastPointerRef.current = { x: event.clientX, y: event.clientY };
-      canvas.setPointerCapture(event.pointerId);
-    };
-
-    const onPointerMove = (event: PointerEvent) => {
-      if (globePointerIdRef.current !== event.pointerId) return;
-      const dx = event.clientX - globeLastPointerRef.current.x;
-      const dy = event.clientY - globeLastPointerRef.current.y;
-      globeLastPointerRef.current = { x: event.clientX, y: event.clientY };
-      globePhiRef.current += dx * 0.0075;
-      globeThetaRef.current = Math.max(-1.25, Math.min(1.25, globeThetaRef.current + dy * 0.0065));
-      updateCenterCoordinates();
-    };
-
-    const onPointerUp = (event: PointerEvent) => {
-      if (globePointerIdRef.current !== event.pointerId) return;
-      globePointerIdRef.current = null;
-      updateCenterCoordinates();
-      try {
-        canvas.releasePointerCapture(event.pointerId);
-      } catch {
-        // noop
-      }
-    };
-
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      const delta = event.deltaY > 0 ? -0.05 : 0.05;
-      globeScaleRef.current = Math.max(0.82, Math.min(2.7, globeScaleRef.current + delta));
-    };
-
-    canvas.addEventListener("pointerdown", onPointerDown);
-    canvas.addEventListener("pointermove", onPointerMove);
-    canvas.addEventListener("pointerup", onPointerUp);
-    canvas.addEventListener("pointercancel", onPointerUp);
-    canvas.addEventListener("wheel", onWheel, { passive: false });
-    updateCenterCoordinates();
-
-    return () => {
-      disposed = true;
-      canvas.removeEventListener("pointerdown", onPointerDown);
-      canvas.removeEventListener("pointermove", onPointerMove);
-      canvas.removeEventListener("pointerup", onPointerUp);
-      canvas.removeEventListener("pointercancel", onPointerUp);
-      canvas.removeEventListener("wheel", onWheel);
-      window.cancelAnimationFrame(frameId);
-      try {
-        globe.destroy();
-      } catch {
-        // noop
-      }
-    };
-  }, [open, stepId]);
-
   const buildLayoutFromAnswers = (): TileItem[] => {
     const selected = new Set(answers.selectedWidgets);
     const base = defaultTileLayout.filter((tile) => selected.has(tile.type as OnboardingWidgetId) && tile.type !== "search");
@@ -400,54 +363,69 @@ export default function OnboardingWizard({
       layout = layout.filter((tile) => tile.type !== "greeting");
     }
 
-    return layout;
+    let normalizedLayout = liftLayoutToTop(layout);
+    if (normalizedLayout.length <= 3) {
+      const adaptive = normalizedLayout.map((tile) => withAdaptiveSpan(tile, normalizedLayout.length));
+      normalizedLayout = compactPackTiles(adaptive);
+      normalizedLayout = liftLayoutToTop(normalizedLayout);
+    }
+
+    return normalizedLayout;
   };
 
-  const persistSelections = (nextStep: OnboardingStepId) => {
-    const layoutConfig = loadLayoutConfig(widgetConstraints);
-    layoutConfig.reactive.layout = buildLayoutFromAnswers();
-    if (answers.path === "preset") {
-      layoutConfig.mode = "reactive";
-      layoutConfig.reactive.preset = answers.presetLayout;
-      const preset = REACTIVE_PRESETS.find((item) => item.id === answers.presetLayout);
-      layoutConfig.reactive.preferredGridCols = preset?.recommendedMaxCols ?? 12;
-    } else if (answers.path === "custom") {
-      layoutConfig.mode = "reactive";
-      const mapped = densityToPreset(answers.customDensity);
-      layoutConfig.reactive.preset = mapped.preset;
-      layoutConfig.reactive.preferredGridCols = mapped.cols;
+  const persistSelections = (nextStep: OnboardingStepId): boolean => {
+    try {
+      const layoutConfig = loadLayoutConfig(widgetConstraints);
+      layoutConfig.reactive.layout = buildLayoutFromAnswers();
+      if (answers.path === "preset") {
+        layoutConfig.mode = "reactive";
+        layoutConfig.reactive.preset = answers.presetLayout;
+        const preset = REACTIVE_PRESETS.find((item) => item.id === answers.presetLayout);
+        layoutConfig.reactive.preferredGridCols = preset?.recommendedMaxCols ?? 12;
+      } else if (answers.path === "custom") {
+        layoutConfig.mode = "reactive";
+        const mapped = densityToPreset(answers.customDensity);
+        layoutConfig.reactive.preset = mapped.preset;
+        layoutConfig.reactive.preferredGridCols = mapped.cols;
+      }
+      saveLayoutConfig(layoutConfig);
+
+      saveWeatherSettings({
+        unit: answers.weather.unit,
+        customLat: isFiniteNumber(answers.weather.customLat) ? answers.weather.customLat : undefined,
+        customLon: isFiniteNumber(answers.weather.customLon) ? answers.weather.customLon : undefined,
+        customCity: answers.weather.customCity,
+      });
+
+      if (answers.calendarUrl.trim()) {
+        storeIcalUrl(answers.calendarUrl.trim());
+      }
+
+      localStorage.setItem("dashboard-quote-category", answers.quoteCategoryId);
+      localStorage.setItem(NEWS_SOURCE_KEY, answers.newsSourceId);
+      localStorage.setItem(NEWS_CUSTOM_RSS_KEY, answers.newsCustomRssUrl.trim());
+      onWallpaperChange(answers.wallpaperUrl);
+      saveQuotesDefaultMode(answers.contentMode);
+      saveBookmarkSyncScope(answers.bookmarks);
+      saveOnboardingDraft(nextStep, answers);
+      setWizardError("");
+      return true;
+    } catch (error) {
+      console.error("Failed to persist onboarding selections", error);
+      setWizardError("Could not save setup progress. Please retry, then refresh if this keeps happening.");
+      return false;
     }
-    saveLayoutConfig(layoutConfig);
-
-    saveWeatherSettings({
-      unit: answers.weather.unit,
-      customLat: isFiniteNumber(answers.weather.customLat) ? answers.weather.customLat : undefined,
-      customLon: isFiniteNumber(answers.weather.customLon) ? answers.weather.customLon : undefined,
-      customCity: answers.weather.customCity,
-    });
-
-    if (answers.calendarUrl.trim()) {
-      storeIcalUrl(answers.calendarUrl.trim());
-    }
-
-    localStorage.setItem("dashboard-quote-category", answers.quoteCategoryId);
-    localStorage.setItem(NEWS_SOURCE_KEY, answers.newsSourceId);
-    localStorage.setItem(NEWS_CUSTOM_RSS_KEY, answers.newsCustomRssUrl.trim());
-    onWallpaperChange(answers.wallpaperUrl);
-    saveQuotesDefaultMode(answers.contentMode);
-    saveBookmarkSyncScope(answers.bookmarks);
-    saveOnboardingDraft(nextStep, answers);
   };
 
   const handleSaveAndExit = () => {
-    persistSelections(stepId);
+    if (!persistSelections(stepId)) return;
     dismissOnboardingUntilResume();
     onRefreshDashboard();
     onClose();
   };
 
   const handleFinalize = () => {
-    persistSelections("review");
+    if (!persistSelections("review")) return;
     markOnboardingCompleted();
     onRefreshDashboard();
     onClose();
@@ -457,13 +435,18 @@ export default function OnboardingWizard({
     const idx = stepRail.indexOf(stepId);
     if (idx <= 0) return;
     const previousStep = stepRail[idx - 1]!;
-    setStepId(previousStep);
-    saveOnboardingDraft(previousStep, answers);
+    try {
+      setStepId(previousStep);
+      saveOnboardingDraft(previousStep, answers);
+      setWizardError("");
+    } catch (error) {
+      console.error("Failed to go back in onboarding wizard", error);
+      setWizardError("Could not save setup progress while going back. Please retry.");
+    }
   };
 
   const canContinue = (() => {
     if (stepId === "path") return answers.path !== null;
-    if (stepId === "widgetChoice") return answers.selectedWidgets.length > 0;
     if (stepId === "contentMode" && answers.contentMode === "news" && answers.newsSourceId === NEWS_CUSTOM_SOURCE_ID) {
       return Boolean(answers.newsCustomRssUrl.trim());
     }
@@ -484,9 +467,8 @@ export default function OnboardingWizard({
     const fallbackStep = newRail[newRail.length - 1] ?? "review";
     const nextStep = candidateSteps.find((candidate) => newRail.includes(candidate)) ?? fallbackStep;
     setAnswers(nextAnswers);
-    persistSelections(nextStep);
+    if (!persistSelections(nextStep)) return;
     setStepId(nextStep);
-    onRefreshDashboard();
   };
 
   const applyThemeChoiceLive = (choice: OnboardingAnswers["themeChoice"]) => {
@@ -508,21 +490,19 @@ export default function OnboardingWizard({
     }
     const idx = stepRail.indexOf(stepId);
     const nextStep = stepRail[Math.min(stepRail.length - 1, idx + 1)]!;
-    persistSelections(nextStep);
+    if (!persistSelections(nextStep)) return;
     setStepId(nextStep);
-    onRefreshDashboard();
   };
 
   const jumpToStep = (targetStep: OnboardingStepId) => {
     if (!stepRail.includes(targetStep)) return;
-    persistSelections(targetStep);
+    if (!persistSelections(targetStep)) return;
     setStepId(targetStep);
   };
 
   const handleJumpToReview = () => {
     if (!canContinue || stepId === "review") return;
     jumpToStep("review");
-    onRefreshDashboard();
   };
 
   const runCitySearch = async () => {
@@ -588,67 +568,248 @@ export default function OnboardingWizard({
           </div>
 
           <div className="onboarding-welcome-content">
-            <p className="text-[13px] uppercase tracking-[0.18em] theme-text-secondary mb-3">
+            <p className="onboarding-welcome-kicker">
               Your new tab, reimagined
             </p>
-            <p className="text-base sm:text-lg max-w-3xl theme-text">
-              Build a calm command center in minutes. Choose a polished preset or shape every widget, color, and feed around your flow.
+            <p className="onboarding-welcome-subtitle theme-text">
+              Build a command center that feels intentional from the first second. Start with a polished baseline, then personalize it to match exactly how you think and work.
             </p>
-            <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <div className="onboarding-welcome-tour-grid">
               {[
-                { title: "Smart Search", note: "One bar, many engines + AI" },
-                { title: "Drag & Resize", note: "Layout that adapts to you" },
-                { title: "Live Widgets", note: "Weather, tasks, calendar, news" },
-                { title: "Themes + Wallpaper", note: "Instant style, zero friction" },
-              ].map((item) => (
+                { title: "Smart Search", note: "Search Google, ChatGPT, Claude, Perplexity and more from one keyboard-first bar." },
+                { title: "Adaptive Layout", note: "Drag, resize, and shape your dashboard so every widget sits where your brain expects it." },
+                { title: "Live Context", note: "Weather, tasks, bookmarks, calendar, and headlines stay visible the moment a tab opens." },
+                { title: "Visual Identity", note: "Curated themes, random palettes, and wallpaper control make the page unmistakably yours." },
+              ].map((item, idx) => (
                 <div
                   key={item.title}
-                  className="rounded-2xl px-3 py-2.5"
-                  style={{
-                    background: "color-mix(in srgb, var(--theme-surface) 58%, transparent)",
-                    backdropFilter: "blur(10px)",
-                  }}
+                  className="onboarding-welcome-tour-card"
+                  style={{ animationDelay: `${1.55 + idx * 0.1}s` }}
                 >
-                  <div className="text-[12px] font-semibold theme-text">{item.title}</div>
-                  <div className="text-[11px] theme-text-secondary mt-1">{item.note}</div>
+                  <div className="text-[11px] uppercase tracking-[0.14em] theme-text-secondary">Feature</div>
+                  <div className="text-[14px] font-semibold theme-text mt-1">{item.title}</div>
+                  <div className="text-[12px] theme-text-secondary mt-1.5">{item.note}</div>
                 </div>
               ))}
             </div>
-            <p className="text-xs theme-text-secondary mt-5">
-              No account. No clutter. Just a better place to land every time you hit Ctrl+T.
-            </p>
+            <div
+              className="onboarding-welcome-next"
+              style={{
+                background: "color-mix(in srgb, var(--theme-surface) 55%, transparent)",
+              }}
+            >
+              <div className="text-[11px] uppercase tracking-[0.14em] theme-text-secondary">What happens next</div>
+              <p className="text-sm theme-text mt-1">
+                Next, pick your widgets. Right after that, choose <span className="font-semibold">Preset</span> for a ready-made layout or <span className="font-semibold">Customize</span> for full control.
+              </p>
+            </div>
           </div>
+          <p className="onboarding-welcome-footer text-xs theme-text-secondary">
+            No account. No tracking. Just a better place to land every time you hit Ctrl+T.
+          </p>
         </div>
       );
     }
 
     if (stepId === "path") {
+      const pathVizMap = {
+        widgets: (
+          <div className="onboarding-path-viz-widgets" aria-hidden>
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div
+                key={i}
+                className={`onboarding-path-viz-tile${i === 2 ? " onboarding-path-viz-tile--accent" : ""}`}
+              />
+            ))}
+          </div>
+        ),
+        blueprint: (
+          <div className="onboarding-path-viz-blueprint" aria-hidden>
+            <div className="onboarding-path-viz-blueprint-bar onboarding-path-viz-blueprint-bar--hero" />
+            <div className="onboarding-path-viz-blueprint-bar" />
+            <div className="onboarding-path-viz-blueprint-bar" />
+          </div>
+        ),
+        theme: <div className="onboarding-path-viz-theme" aria-hidden />,
+        branch: (
+          <div className="onboarding-path-viz-branch" aria-hidden>
+            <span className="onboarding-path-viz-dot" />
+            <span className="onboarding-path-viz-branch-line" />
+            <span className="onboarding-path-viz-dot" />
+            <span className="onboarding-path-viz-branch-line" />
+            <span className="onboarding-path-viz-dot" />
+            <span className="onboarding-path-viz-branch-line" />
+            <span className="onboarding-path-viz-dot" />
+          </div>
+        ),
+        review: (
+          <div className="onboarding-path-viz-depth" aria-hidden>
+            <div className="onboarding-path-viz-depth-row onboarding-path-viz-depth-row--accent" />
+            <div className="onboarding-path-viz-depth-row" />
+            <div className="onboarding-path-viz-depth-row onboarding-path-viz-depth-row--accent" />
+            <div className="onboarding-path-viz-depth-row" />
+          </div>
+        ),
+        density: (
+          <div className="onboarding-path-viz-density" aria-hidden>
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div key={i} className="onboarding-path-viz-density-col" />
+            ))}
+          </div>
+        ),
+      } satisfies Record<"widgets" | "blueprint" | "theme" | "branch" | "review" | "density", JSX.Element>;
+
+      const presetTimeline: Array<{ title: string; detail: string; viz: JSX.Element | null }> = [
+        {
+          title: "Pick your widgets",
+          detail:
+            "Toggle what belongs on every new tab. Preset keeps the wizard short—we only drill into widgets you turned on.",
+          viz: pathVizMap.widgets,
+        },
+        {
+          title: "Apply a finished layout pack",
+          detail:
+            "Choose a blueprint and we drop cards into place with spacing and columns already tuned—no fiddling required.",
+          viz: pathVizMap.blueprint,
+        },
+        {
+          title: "Set the look and finish",
+          detail:
+            "Pick theme + wallpaper, run any optional widget screens that matter, then review and save in one pass.",
+          viz: pathVizMap.review,
+        },
+      ];
+
+      const customTimeline: Array<{ title: string; detail: string; viz: JSX.Element | null }> = [
+        {
+          title: "Pick your widgets deliberately",
+          detail:
+            "Every module you toggle unlocks finer steps later—you control breadth before we touch density or integrations.",
+          viz: pathVizMap.widgets,
+        },
+        {
+          title: "Choose your layout density",
+          detail:
+            "Select Comfortable, Balanced, or Dense to control spacing and information pressure before deeper setup.",
+          viz: pathVizMap.density,
+        },
+        {
+          title: "Theme and wallpaper artistry",
+          detail:
+            "Same surfaces as preset, but the intent is personal curation—you can revisit tokens or swap wallpaper until it clicks.",
+          viz: pathVizMap.theme,
+        },
+        {
+          title: "Per-widget mastery",
+          detail:
+            "Folders, ICS links, locales, RSS, homelab pings—everything gets explicit rows so power users never fight defaults.",
+          viz: pathVizMap.review,
+        },
+        {
+          title: "Review and finalize",
+          detail:
+            "The final review shows your full stack so you can jump back, adjust, and then lock it in.",
+          viz: pathVizMap.blueprint,
+        },
+      ];
+      const selectedWidgetCount = answers.selectedWidgets.length;
+      const customEstimateMin = Math.max(7, 5 + selectedWidgetCount);
+      const customEstimateMax = Math.max(customEstimateMin + 6, 10 + selectedWidgetCount * 3);
+      const customEstimateLabel = `~${customEstimateMin}–${customEstimateMax} min`;
+
       return (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {([
-            { id: "preset", title: "Use a preset", blurb: "Start with a polished layout immediately." },
-            { id: "custom", title: "Customize with wizard", blurb: "Walk through each setup decision." },
-          ] as const).map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              onClick={() => setAnswers((prev) => ({ ...prev, path: option.id }))}
-              className="text-left rounded-2xl border p-4 transition-colors"
-              style={{
-                borderColor:
-                  answers.path === option.id
-                    ? "color-mix(in srgb, var(--theme-accent) 55%, transparent)"
-                    : "color-mix(in srgb, var(--theme-border) 72%, transparent)",
-                background:
-                  answers.path === option.id
-                    ? "color-mix(in srgb, var(--theme-accent) 12%, transparent)"
-                    : "color-mix(in srgb, var(--theme-surface) 70%, transparent)",
-              }}
+        <div className="space-y-5">
+          <p className="text-sm theme-text-secondary leading-relaxed">
+            <span className="font-semibold theme-text">Preset</span> is the fast lane: curated layouts snap in so you ship a polished new tab fast.{" "}
+            <span className="font-semibold theme-text">Custom</span> swaps the blueprint step for density control plus deeper drawers on every gadget you enabled.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {([
+              {
+                id: "preset",
+                title: "Use a preset",
+                estimate: "~3–10 min",
+                blurb: "Lets Tabreeze tune grid math for you.",
+              },
+              {
+                id: "custom",
+                title: "Customize with wizard",
+                estimate: customEstimateLabel,
+                blurb: "You steer density and every powered widget.",
+              },
+            ] as const).map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setAnswers((prev) => ({ ...prev, path: option.id }))}
+                className="text-left rounded-2xl border p-4 transition-colors"
+                style={{
+                  borderColor:
+                    answers.path === option.id
+                      ? "color-mix(in srgb, var(--theme-accent) 55%, transparent)"
+                      : "color-mix(in srgb, var(--theme-border) 72%, transparent)",
+                  background:
+                    answers.path === option.id
+                      ? "color-mix(in srgb, var(--theme-accent) 12%, transparent)"
+                      : "color-mix(in srgb, var(--theme-surface) 70%, transparent)",
+                }}
+              >
+                <div className="font-semibold text-sm theme-text">{option.title}</div>
+                <div className="mt-1">
+                  <span className="onboarding-path-time-pill">{option.estimate}</span>
+                </div>
+                <div className="text-xs theme-text-secondary mt-1">{option.blurb}</div>
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div
+              className={`onboarding-path-journey${answers.path === "preset" ? " onboarding-path-journey--active" : ""}`}
             >
-              <div className="font-medium text-sm theme-text">{option.title}</div>
-              <div className="text-xs theme-text-secondary mt-1">{option.blurb}</div>
-            </button>
-          ))}
+              <div className="text-xs font-semibold uppercase tracking-[0.12em] theme-text-secondary">Preset timeline</div>
+              <p className="text-xs theme-text-secondary mt-3 leading-snug">
+                Fastest onboarding: blueprint applies immediately after widgets, integrations only surface when relevant, finishing is mostly confirmation.
+              </p>
+              <div className="mt-2">
+                {presetTimeline.map((row, idx) => (
+                  <div key={row.title} className="onboarding-path-step">
+                    <div className="onboarding-path-step-index">{idx + 1}</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold theme-text">{row.title}</div>
+                      <p className="text-xs theme-text-secondary mt-2 leading-snug">{row.detail}</p>
+                      {row.viz ? (
+                        <div className="onboarding-path-viz">{row.viz}</div>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div
+              className={`onboarding-path-journey${answers.path === "custom" ? " onboarding-path-journey--active" : ""}`}
+            >
+              <div className="text-xs font-semibold uppercase tracking-[0.12em] theme-text-secondary">Custom timeline</div>
+              <p className="text-xs theme-text-secondary mt-3 leading-snug">
+                Every stage adds control: spacing choices up front and deep configuration afterward, capped by review so nothing stays hidden behind defaults.
+              </p>
+              <div className="mt-2">
+                {customTimeline.map((row, idx) => (
+                  <div key={row.title} className="onboarding-path-step">
+                    <div className="onboarding-path-step-index">{idx + 1}</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold theme-text">{row.title}</div>
+                      <p className="text-xs theme-text-secondary mt-2 leading-snug">{row.detail}</p>
+                      {row.viz ? (
+                        <div className="onboarding-path-viz">{row.viz}</div>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       );
     }
@@ -1230,9 +1391,24 @@ export default function OnboardingWizard({
       return (
         <div className="space-y-4">
           <div className="relative h-60 rounded-2xl overflow-hidden border flex items-center justify-center">
-            <canvas
-              ref={globeCanvasRef}
-              className="w-full h-full touch-none cursor-grab active:cursor-grabbing bg-transparent"
+            <OnboardingGlobe
+              initialPhi={globePhiRef.current}
+              initialTheta={globeThetaRef.current}
+              initialScale={globeScaleRef.current}
+              phiRef={globePhiRef}
+              thetaRef={globeThetaRef}
+              scaleRef={globeScaleRef}
+              onCoordinatesChange={(lat, lon) => {
+                setAnswers((prev) => ({
+                  ...prev,
+                  weather: {
+                    ...prev.weather,
+                    customLat: lat,
+                    customLon: lon,
+                    customCity: prev.weather.customCity || "Pinned location",
+                  },
+                }));
+              }}
             />
             <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
               <div className="w-3.5 h-3.5 rounded-full border border-white shadow-sm bg-red-500/90" />
@@ -1244,7 +1420,7 @@ export default function OnboardingWizard({
               Use my location
             </button>
             <span className="text-xs theme-text-secondary">
-              Lat {answers.weather.customLat?.toFixed(3) ?? "—"} / Lon {answers.weather.customLon?.toFixed(3) ?? "—"}
+              Lat {formatCoordinate(answers.weather.customLat)} / Lon {formatCoordinate(answers.weather.customLon)}
             </span>
           </div>
           {weatherStatus ? <p className="text-xs theme-text-secondary">{weatherStatus}</p> : null}
@@ -1532,57 +1708,63 @@ export default function OnboardingWizard({
             ) : null}
           </div>
         ) : null}
-        <div className="rounded-xl border p-3">
-          <div className="font-medium theme-text mb-1">Bookmarks</div>
-          <div className="text-xs theme-text-secondary">
-            {answers.bookmarks.includedFolderIds.length} folders, {answers.bookmarks.excludedBookmarkIds.length} exclusions
+        {answers.selectedWidgets.includes("bookmarks") ? (
+          <div className="rounded-xl border p-3">
+            <div className="font-medium theme-text mb-1">Bookmarks</div>
+            <div className="text-xs theme-text-secondary">
+              {answers.bookmarks.includedFolderIds.length} folders, {answers.bookmarks.excludedBookmarkIds.length} exclusions
+            </div>
+            {stepRail.includes("bookmarks") ? (
+              <button type="button" className="btn-ghost text-[11px] mt-2" onClick={() => jumpToStep("bookmarks")}>
+                Edit step
+              </button>
+            ) : null}
           </div>
-          {stepRail.includes("bookmarks") ? (
-            <button type="button" className="btn-ghost text-[11px] mt-2" onClick={() => jumpToStep("bookmarks")}>
-              Edit step
-            </button>
-          ) : null}
-        </div>
-        <div className="rounded-xl border p-3">
-          <div className="font-medium theme-text mb-1">Weather</div>
-          <div className="text-xs theme-text-secondary">
-            {answers.weather.customCity || "Pinned location"} ({answers.weather.customLat?.toFixed(3) ?? "—"},{" "}
-            {answers.weather.customLon?.toFixed(3) ?? "—"})
+        ) : null}
+        {answers.selectedWidgets.includes("weather") ? (
+          <div className="rounded-xl border p-3">
+            <div className="font-medium theme-text mb-1">Weather</div>
+            <div className="text-xs theme-text-secondary">
+              {answers.weather.customCity || "Pinned location"} ({formatCoordinate(answers.weather.customLat)},{" "}
+              {formatCoordinate(answers.weather.customLon)})
+            </div>
+            {stepRail.includes("weather") ? (
+              <button type="button" className="btn-ghost text-[11px] mt-2" onClick={() => jumpToStep("weather")}>
+                Edit step
+              </button>
+            ) : null}
           </div>
-          {stepRail.includes("weather") ? (
-            <button type="button" className="btn-ghost text-[11px] mt-2" onClick={() => jumpToStep("weather")}>
-              Edit step
-            </button>
-          ) : null}
-        </div>
-        <div className="rounded-xl border p-3">
-          <div className="font-medium theme-text mb-1">Calendar</div>
-          <div className="text-xs theme-text-secondary">{answers.calendarUrl ? "Connected URL ready" : "Skipped for now"}</div>
-          {stepRail.includes("calendar") ? (
-            <button type="button" className="btn-ghost text-[11px] mt-2" onClick={() => jumpToStep("calendar")}>
-              Edit step
-            </button>
-          ) : null}
-        </div>
-        <div className="rounded-xl border p-3">
-          <div className="font-medium theme-text mb-1">Quotes / News</div>
-          <div className="text-xs theme-text-secondary">
-            {answers.selectedWidgets.includes("quotes")
-              ? answers.contentMode === "news"
+        ) : null}
+        {answers.selectedWidgets.includes("calendar") ? (
+          <div className="rounded-xl border p-3">
+            <div className="font-medium theme-text mb-1">Calendar</div>
+            <div className="text-xs theme-text-secondary">{answers.calendarUrl ? "Connected URL ready" : "Skipped for now"}</div>
+            {stepRail.includes("calendar") ? (
+              <button type="button" className="btn-ghost text-[11px] mt-2" onClick={() => jumpToStep("calendar")}>
+                Edit step
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {answers.selectedWidgets.includes("quotes") ? (
+          <div className="rounded-xl border p-3">
+            <div className="font-medium theme-text mb-1">Quotes / News</div>
+            <div className="text-xs theme-text-secondary">
+              {answers.contentMode === "news"
                 ? `${answers.contentMode} (${
                     answers.newsSourceId === NEWS_CUSTOM_SOURCE_ID
                       ? answers.newsCustomRssUrl.trim() || "Custom RSS (not set)"
                       : NEWS_SOURCES.find((source) => source.id === answers.newsSourceId)?.label ?? answers.newsSourceId
                   })`
-                : `${answers.contentMode} (${answers.quoteCategoryId})`
-              : "Widget removed"}
+                : `${answers.contentMode} (${answers.quoteCategoryId})`}
+            </div>
+            {stepRail.includes("contentMode") ? (
+              <button type="button" className="btn-ghost text-[11px] mt-2" onClick={() => jumpToStep("contentMode")}>
+                Edit step
+              </button>
+            ) : null}
           </div>
-          {stepRail.includes("contentMode") ? (
-            <button type="button" className="btn-ghost text-[11px] mt-2" onClick={() => jumpToStep("contentMode")}>
-              Edit step
-            </button>
-          ) : null}
-        </div>
+        ) : null}
       </div>
     );
   };
@@ -1591,7 +1773,7 @@ export default function OnboardingWizard({
   const isWelcomeStep = stepId === "welcome";
 
   return createPortal(
-    <div className="fixed inset-0 z-[250] p-2 sm:p-3 md:p-4 flex items-center justify-center">
+    <div className="fixed inset-0 z-[250] p-2 sm:p-3 md:p-4 pt-9 pb-24 flex items-center justify-center">
       <div
         className="absolute inset-0 onboarding-ambient-backdrop"
         aria-hidden="true"
@@ -1613,26 +1795,31 @@ export default function OnboardingWizard({
       </div>
       <div className="absolute inset-0 onboarding-glass-pane-fullscreen pointer-events-none" aria-hidden="true" />
       <div className="absolute inset-0" aria-hidden="true" />
+      <div className="absolute top-0 inset-x-0 z-20">
+        <OnboardingWizardProgressBar fraction={progressFraction} />
+      </div>
       <div className="relative z-10 w-full max-w-[1200px]">
         <div
           role="dialog"
           aria-modal="true"
-          className="relative rounded-[32px] overflow-hidden shadow-2xl"
+          className="relative"
           style={{
-            background: "color-mix(in srgb, var(--theme-bg) 90%, transparent)",
-            backdropFilter: "blur(24px)",
             color: "var(--theme-text)",
           }}
         >
-          <OnboardingWizardProgressBar fraction={progressFraction} />
           {!isWelcomeStep ? (
             <div className="px-7 sm:px-9 pt-6 pb-2">
               <div className="text-[11px] uppercase tracking-wide theme-text-secondary mb-1">Setup wizard</div>
               <h2 className="text-lg font-semibold theme-text">{STEP_TITLES[stepId]}</h2>
+              {wizardError ? <p className="mt-2 text-xs text-red-500">{wizardError}</p> : null}
             </div>
           ) : null}
           <div
-            className={isWelcomeStep ? "px-7 sm:px-10 pb-8 pt-3 min-h-[70vh]" : "px-7 sm:px-9 pb-6 max-h-[70vh] overflow-y-auto"}
+            className={
+              isWelcomeStep
+                ? "px-7 sm:px-10 pb-12 pt-3 min-h-[72vh]"
+                : "px-7 sm:px-9 pb-8 max-h-[calc(100vh-196px)] overflow-y-auto"
+            }
           >
             {renderStep()}
           </div>

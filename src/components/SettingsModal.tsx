@@ -499,6 +499,26 @@ export default function SettingsModal({
               </span>
             </div>
           </section>
+
+          <section className="glass p-4 rounded-2xl">
+            <h3 className="text-sm font-semibold theme-text mb-2">Enjoying Tabreeze?</h3>
+            <p className="text-[11px] theme-text-secondary mb-3">
+              If Tabreeze has been helpful, leaving a quick review on the Chrome Web Store really helps.
+            </p>
+            <a
+              href="https://chromewebstore.google.com/detail/tabreeze/nicfglggmbdhllhfeciibfbjdicgbdfa"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 text-xs px-3 py-1.5 rounded-xl transition-colors"
+              style={{
+                background: "color-mix(in srgb, var(--theme-surface-hover) 75%, transparent)",
+                color: "var(--theme-text)",
+                border: "1px solid color-mix(in srgb, var(--theme-border) 72%, transparent)",
+              }}
+            >
+              Leave a review
+            </a>
+          </section>
         </div>
       </div>
     </div>,

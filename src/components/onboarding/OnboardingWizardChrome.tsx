@@ -32,38 +32,39 @@ export default function OnboardingWizardChrome({
 
   return (
     <div
-      className="sticky bottom-0 z-10 mt-4 p-4 border-t flex items-center justify-between gap-2 backdrop-blur-xl"
+      className="fixed bottom-0 inset-x-0 z-[260] px-5 sm:px-8 py-4 sm:py-5 border-t flex items-center justify-between gap-3 backdrop-blur-xl"
       style={{
         borderColor: "color-mix(in srgb, var(--theme-border) 68%, transparent)",
         background: "color-mix(in srgb, var(--theme-bg) 94%, transparent)",
       }}
     >
       <div className="flex items-center gap-2">
-        <button type="button" className="btn-ghost text-xs" onClick={onSaveLater}>
+        <button type="button" className="btn-ghost text-sm" onClick={onSaveLater}>
           Save and continue later
         </button>
-        <button type="button" className="btn-ghost text-xs" onClick={onExit}>
+        <button type="button" className="btn-ghost text-sm" onClick={onExit}>
           Exit
         </button>
       </div>
 
       <div className="flex items-center gap-2">
-        <button type="button" className="btn-ghost text-xs" onClick={onBack} disabled={!canGoBack}>
+        <button type="button" className="btn-ghost text-sm" onClick={onBack} disabled={!canGoBack}>
           Back
         </button>
         {showJumpToFinish && onJumpToFinish ? (
-          <button type="button" className="btn-ghost text-xs" onClick={onJumpToFinish} disabled={!canGoNext}>
+          <button type="button" className="btn-ghost text-sm" onClick={onJumpToFinish} disabled={!canGoNext}>
             Jump to review & finish
           </button>
         ) : null}
         <button
           type="button"
-          className="btn-primary text-xs"
+          className="btn-primary text-sm px-5 py-2.5 inline-flex items-center gap-1.5"
           onClick={onNext}
           disabled={!canGoNext}
           style={nextDisabledStyle}
         >
-          {nextLabel}
+          <span>{nextLabel}</span>
+          <span aria-hidden="true">→</span>
         </button>
       </div>
     </div>

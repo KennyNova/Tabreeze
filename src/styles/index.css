@@ -133,7 +133,7 @@
     width: 0;
   }
   to {
-    width: 8.3ch;
+    width: 8ch;
   }
 }
 
@@ -162,11 +162,142 @@
 @keyframes onboardingWelcomeContentIn {
   from {
     opacity: 0;
-    transform: translateY(18px);
+    transform: translateY(24px);
   }
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes onboardingWelcomeSubtitleIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes onboardingWelcomeCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Onboarding · choose path — timeline step reveals & mini-visuals */
+@keyframes onboardingPathStepLift {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes onboardingPathTileAppear {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(0.88);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes onboardingPathTileGlow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 color-mix(in srgb, var(--theme-accent) 0%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--theme-accent) 35%, transparent),
+      0 0 14px color-mix(in srgb, var(--theme-accent) 18%, transparent);
+  }
+}
+
+@keyframes onboardingPathBlueprintClamp {
+  0% {
+    transform: translateY(-3px);
+    opacity: 0.75;
+    filter: blur(1px);
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+@keyframes onboardingPathThemeDrift {
+  0% {
+    background-position: 0% 50%;
+    opacity: 0.92;
+  }
+  50% {
+    background-position: 100% 50%;
+    opacity: 1;
+  }
+  100% {
+    background-position: 0% 50%;
+    opacity: 0.92;
+  }
+}
+
+@keyframes onboardingPathPulseDot {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes onboardingPathColumnWave {
+  0% {
+    opacity: 0.35;
+    flex: 0 0 6%;
+  }
+  40% {
+    opacity: 0.65;
+    flex: 0 0 28%;
+  }
+  55% {
+    opacity: 1;
+    flex: 0 0 12%;
+  }
+  75% {
+    opacity: 0.8;
+    flex: 0 0 22%;
+  }
+  100% {
+    opacity: 0.75;
+    flex: 0 0 14%;
+  }
+}
+
+@keyframes onboardingPathCascade {
+  from {
+    transform: translateY(6px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
   }
 }
 
@@ -382,8 +513,9 @@
 
   .onboarding-welcome-stage {
     position: relative;
-    min-height: 60vh;
-    padding-top: 72px;
+    min-height: min(72vh, 720px);
+    padding-top: clamp(84px, 14vh, 140px);
+    padding-bottom: 72px;
   }
 
   .onboarding-welcome-title-wrap {
@@ -409,19 +541,96 @@
     text-shadow:
       0 0 24px color-mix(in srgb, var(--theme-accent) 22%, transparent),
       0 2px 28px color-mix(in srgb, #000 20%, transparent);
-    border-right: 2px solid color-mix(in srgb, var(--theme-accent) 60%, transparent);
     animation: onboardingTitleType 0.92s steps(8, end) 0.3s forwards;
   }
 
   .onboarding-welcome-content {
     opacity: 0;
-    animation: onboardingWelcomeContentIn 0.8s cubic-bezier(0.2, 0.72, 0.16, 1) 1.5s forwards;
+    max-width: min(980px, 92vw);
+    margin: 0 auto;
+    animation: onboardingWelcomeContentIn 0.85s cubic-bezier(0.2, 0.72, 0.16, 1) 1.5s forwards;
+  }
+
+  .onboarding-welcome-kicker {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    color: color-mix(in srgb, var(--theme-text-secondary) 92%, transparent);
+    margin-bottom: 14px;
+    opacity: 0;
+    animation: onboardingWelcomeSubtitleIn 0.55s ease-out 1.64s forwards;
+  }
+
+  .onboarding-welcome-subtitle {
+    font-size: clamp(1.05rem, 1.35vw, 1.35rem);
+    line-height: 1.55;
+    max-width: 68ch;
+    opacity: 0;
+    animation: onboardingWelcomeSubtitleIn 0.65s ease-out 1.72s forwards;
+  }
+
+  .onboarding-welcome-tour-grid {
+    margin-top: 22px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .onboarding-welcome-tour-card {
+    border-radius: 16px;
+    padding: 12px 13px;
+    background: color-mix(in srgb, var(--theme-surface) 54%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-border) 28%, transparent);
+    backdrop-filter: blur(10px) saturate(1.06);
+    opacity: 0;
+    animation: onboardingWelcomeCardIn 0.52s cubic-bezier(0.2, 0.72, 0.16, 1) forwards;
+  }
+
+  .onboarding-welcome-next {
+    margin-top: 12px;
+    border-radius: 14px;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--theme-border) 26%, transparent);
+    backdrop-filter: blur(8px) saturate(1.05);
+    opacity: 0;
+    animation: onboardingWelcomeCardIn 0.56s cubic-bezier(0.2, 0.72, 0.16, 1) 1.98s forwards;
+  }
+
+  .onboarding-welcome-footer {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 4px;
+    text-align: center;
+    opacity: 0;
+    animation: onboardingWelcomeSubtitleIn 0.5s ease-out 2.08s forwards;
+  }
+
+  @media (max-width: 840px) {
+    .onboarding-welcome-stage {
+      min-height: min(78vh, 700px);
+      padding-top: clamp(96px, 18vh, 168px);
+    }
+
+    .onboarding-welcome-tour-grid {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    .onboarding-welcome-footer {
+      bottom: 0;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {
     .onboarding-welcome-title-wrap,
     .onboarding-welcome-title-text,
-    .onboarding-welcome-content {
+    .onboarding-welcome-content,
+    .onboarding-welcome-kicker,
+    .onboarding-welcome-subtitle,
+    .onboarding-welcome-tour-card,
+    .onboarding-welcome-next,
+    .onboarding-welcome-footer {
       animation: none;
     }
 
@@ -438,6 +647,325 @@
     }
 
     .onboarding-welcome-content {
+      opacity: 1;
+    }
+
+    .onboarding-welcome-kicker,
+    .onboarding-welcome-subtitle,
+    .onboarding-welcome-tour-card,
+    .onboarding-welcome-next,
+    .onboarding-welcome-footer {
+      opacity: 1;
+    }
+  }
+
+  /* Choose path — journey timelines */
+  .onboarding-path-journey {
+    border-radius: 18px;
+    padding: 14px 15px;
+    border: 1px solid color-mix(in srgb, var(--theme-border) 56%, transparent);
+    background: color-mix(in srgb, var(--theme-surface) 58%, transparent);
+    backdrop-filter: blur(12px) saturate(1.05);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .onboarding-path-journey--active {
+    border-color: color-mix(in srgb, var(--theme-accent) 48%, var(--theme-border) 52%);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-accent) 18%, transparent);
+  }
+
+  .onboarding-path-time-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: color-mix(in srgb, var(--theme-text) 92%, transparent);
+    background: color-mix(in srgb, var(--theme-accent) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-accent) 28%, transparent);
+  }
+
+  .onboarding-path-step {
+    display: flex;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--theme-border) 45%, transparent);
+    opacity: 0;
+    animation: onboardingPathStepLift 0.55s cubic-bezier(0.2, 0.72, 0.16, 1) forwards;
+  }
+
+  .onboarding-path-step:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  .onboarding-path-step-index {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: color-mix(in srgb, var(--theme-text) 95%, transparent);
+    background: color-mix(in srgb, var(--theme-surface-hover) 88%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-border) 55%, transparent);
+  }
+
+  .onboarding-path-viz {
+    margin-top: 10px;
+    height: 56px;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--theme-border) 42%, transparent);
+    background: color-mix(in srgb, var(--theme-bg) 38%, transparent);
+    position: relative;
+  }
+
+  .onboarding-path-viz-widgets {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 4px;
+    padding: 8px;
+    height: 100%;
+    align-content: center;
+  }
+
+  .onboarding-path-viz-tile {
+    height: 10px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--theme-border) 72%, transparent);
+    opacity: 0;
+    animation: onboardingPathTileAppear 0.45s cubic-bezier(0.2, 0.72, 0.16, 1) forwards,
+      onboardingPathTileGlow 2.4s ease-in-out infinite 0.6s;
+  }
+
+  .onboarding-path-viz-tile--accent {
+    background: color-mix(in srgb, var(--theme-accent) 52%, var(--theme-border) 48%);
+  }
+
+  .onboarding-path-viz-blueprint {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 8px;
+    height: 100%;
+    justify-content: center;
+  }
+
+  .onboarding-path-viz-blueprint-bar {
+    height: 8px;
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--theme-border) 72%, transparent);
+    transform-origin: center top;
+    animation: onboardingPathBlueprintClamp 0.7s cubic-bezier(0.25, 0.85, 0.2, 1) both;
+  }
+
+  .onboarding-path-viz-blueprint-bar--hero {
+    background: color-mix(in srgb, var(--theme-accent) 55%, var(--theme-border) 45%);
+    animation-delay: 0.05s;
+  }
+
+  .onboarding-path-viz-blueprint-bar:nth-child(2) {
+    animation-delay: 0.12s;
+    width: 72%;
+  }
+
+  .onboarding-path-viz-blueprint-bar:nth-child(3) {
+    animation-delay: 0.2s;
+    width: 88%;
+  }
+
+  .onboarding-path-viz-theme {
+    height: 100%;
+    background: linear-gradient(
+      120deg,
+      color-mix(in srgb, var(--theme-accent) 55%, transparent),
+      color-mix(in srgb, var(--theme-surface) 40%, transparent),
+      color-mix(in srgb, var(--theme-accent-hover) 45%, transparent)
+    );
+    background-size: 220% 220%;
+    animation: onboardingPathThemeDrift 8s ease-in-out infinite;
+  }
+
+  .onboarding-path-viz-branch {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+    height: 100%;
+    gap: 6px;
+  }
+
+  .onboarding-path-viz-branch-line {
+    flex: 1;
+    height: 2px;
+    border-radius: 2px;
+    background: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--theme-border) 25%, transparent),
+      color-mix(in srgb, var(--theme-accent) 38%, transparent),
+      color-mix(in srgb, var(--theme-border) 25%, transparent)
+    );
+  }
+
+  .onboarding-path-viz-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--theme-accent) 55%, var(--theme-border) 45%);
+    animation: onboardingPathPulseDot 1.6s ease-in-out infinite;
+  }
+
+  .onboarding-path-viz-dot:nth-child(2) {
+    animation-delay: 0.25s;
+  }
+
+  .onboarding-path-viz-dot:nth-child(4) {
+    animation-delay: 0.5s;
+  }
+
+  .onboarding-path-viz-density {
+    display: flex;
+    align-items: stretch;
+    gap: 3px;
+    padding: 8px;
+    height: 100%;
+  }
+
+  .onboarding-path-viz-density-col {
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--theme-border) 68%, transparent);
+    animation: onboardingPathColumnWave 3.2s ease-in-out infinite;
+  }
+
+  .onboarding-path-viz-density-col:nth-child(1) {
+    animation-delay: 0s;
+  }
+
+  .onboarding-path-viz-density-col:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+
+  .onboarding-path-viz-density-col:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+
+  .onboarding-path-viz-density-col:nth-child(4) {
+    animation-delay: 0.45s;
+  }
+
+  .onboarding-path-viz-density-col:nth-child(5) {
+    animation-delay: 0.6s;
+  }
+
+  .onboarding-path-viz-depth {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px;
+    height: 100%;
+    justify-content: center;
+  }
+
+  .onboarding-path-viz-depth-row {
+    height: 7px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--theme-border) 70%, transparent);
+    opacity: 0;
+    animation: onboardingPathCascade 0.45s ease-out forwards;
+  }
+
+  .onboarding-path-viz-depth-row--accent {
+    background: color-mix(in srgb, var(--theme-accent) 48%, var(--theme-border) 52%);
+  }
+
+  .onboarding-path-viz-depth-row:nth-child(1) {
+    width: 88%;
+    animation-delay: 0.05s;
+  }
+
+  .onboarding-path-viz-depth-row:nth-child(2) {
+    width: 64%;
+    animation-delay: 0.15s;
+  }
+
+  .onboarding-path-viz-depth-row:nth-child(3) {
+    width: 76%;
+    animation-delay: 0.25s;
+  }
+
+  .onboarding-path-viz-depth-row:nth-child(4) {
+    width: 52%;
+    animation-delay: 0.35s;
+  }
+
+  .onboarding-path-step:nth-child(1) {
+    animation-delay: 0.04s;
+  }
+
+  .onboarding-path-step:nth-child(2) {
+    animation-delay: 0.12s;
+  }
+
+  .onboarding-path-step:nth-child(3) {
+    animation-delay: 0.2s;
+  }
+
+  .onboarding-path-step:nth-child(4) {
+    animation-delay: 0.28s;
+  }
+
+  .onboarding-path-viz-tile:nth-child(1) {
+    animation-delay: 0.05s;
+  }
+
+  .onboarding-path-viz-tile:nth-child(2) {
+    animation-delay: 0.1s;
+  }
+
+  .onboarding-path-viz-tile:nth-child(3) {
+    animation-delay: 0.15s;
+  }
+
+  .onboarding-path-viz-tile:nth-child(4) {
+    animation-delay: 0.2s;
+  }
+
+  .onboarding-path-viz-tile:nth-child(5) {
+    animation-delay: 0.25s;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .onboarding-path-step,
+    .onboarding-path-viz-tile,
+    .onboarding-path-viz-blueprint-bar,
+    .onboarding-path-viz-theme,
+    .onboarding-path-viz-dot,
+    .onboarding-path-viz-density-col,
+    .onboarding-path-viz-depth-row {
+      animation: none;
+    }
+
+    .onboarding-path-step,
+    .onboarding-path-viz-tile {
+      opacity: 1;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .onboarding-path-viz-depth-row {
+      opacity: 1;
+      transform: none;
+    }
+
+    .onboarding-path-viz-density-col {
+      flex: 0 0 12%;
       opacity: 1;
     }
   }
