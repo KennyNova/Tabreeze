@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { widgetConstraints } from "../widgetRegistry";
 import ThemeSwatchPanel from "../ThemeSwatchPanel";
@@ -6,7 +6,7 @@ import SearchSourceLogo from "../../search/SearchSourceLogo";
 import { loadLayoutConfig, saveLayoutConfig } from "../../layout/storage";
 import { REACTIVE_PRESETS } from "../../layout/reactive";
 import { defaultTileLayout } from "../../layout/constants";
-import type { TileItem } from "../../layout/types";
+import type { ReactivePreset, TileItem } from "../../layout/types";
 import { getStoredIcalUrl, storeIcalUrl } from "../../services/googleCalendar";
 import { getWeatherSettings, saveWeatherSettings, searchCity, type GeocodingResult } from "../../services/weather";
 import { loadQuotesDefaultMode, saveQuotesDefaultMode } from "../../settings/quotesMode";
@@ -28,6 +28,7 @@ import {
   saveOnboardingDraft,
   type OnboardingAnswers,
   type OnboardingContentMode,
+  type OnboardingPresetProfileId,
   type OnboardingStepId,
   type OnboardingWidgetId,
 } from "../../settings/onboarding";
@@ -92,14 +93,11 @@ function QuoteCategoryIcon({ categoryId }: { categoryId: string }) {
 
 function getStepRail(answers: OnboardingAnswers): OnboardingStepId[] {
   const hasWidget = (widget: OnboardingWidgetId) => answers.selectedWidgets.includes(widget);
-  const steps: OnboardingStepId[] = [
-    "welcome",
-    "widgetChoice",
-    "path",
-    answers.path === "custom" ? "customLayout" : "presetLayout",
-    "theme",
-    "wallpaper",
-  ];
+  const shouldSkipPresetLayout = answers.path === "preset" && answers.selectedWidgets.length <= 2;
+  const steps: OnboardingStepId[] = ["welcome", "widgetChoice", "path"];
+  if (answers.path === "custom") steps.push("customLayout");
+  else if (!shouldSkipPresetLayout) steps.push("presetLayout");
+  steps.push("theme", "wallpaper");
   if (hasWidget("search")) steps.push("searchConfig");
   if (hasWidget("bookmarks")) steps.push("bookmarks");
   if (hasWidget("weather")) steps.push("weather");
@@ -201,6 +199,592 @@ function inferThemeChoiceFromTheme(theme: ThemeState): OnboardingAnswers["themeC
   return "light";
 }
 
+const PRESET_PREVIEW_CONFIG = { cols: 12, rowHeight: 11, gap: 3 };
+const ALL_WIDGETS: OnboardingWidgetId[] = [
+  "greeting",
+  "search",
+  "bookmarks",
+  "tasks",
+  "calendar",
+  "weather",
+  "quotes",
+  "homelab",
+];
+
+type PresetPreviewStrategy =
+  | "starter"
+  | "deep-work"
+  | "signal-hub"
+  | "research-desk"
+  | "ops-center"
+  | "everything"
+  | "spotlight";
+
+interface PresetProfileDefinition {
+  id: OnboardingPresetProfileId;
+  title: string;
+  subtitle: string;
+  description: string;
+  requiredWidgets: OnboardingWidgetId[];
+  reactivePreset: ReactivePreset;
+  previewStrategy: PresetPreviewStrategy;
+  focusWidget?: OnboardingWidgetId;
+  compactSearch?: boolean;
+}
+
+const PRESET_PROFILES: PresetProfileDefinition[] = [
+  {
+    id: "starter",
+    title: "Starter Command Bar",
+    subtitle: "Fast everyday launcher",
+    description: "Clean top search with core cards underneath for a quick, low-friction start.",
+    requiredWidgets: ["search"],
+    reactivePreset: "balanced",
+    previewStrategy: "starter",
+  },
+  {
+    id: "quick-glance",
+    title: "Quick Glance",
+    subtitle: "Simple at-a-glance start",
+    description: "A lightweight dashboard that keeps search and your core cards easy to scan.",
+    requiredWidgets: ["search"],
+    reactivePreset: "balanced",
+    previewStrategy: "starter",
+  },
+  {
+    id: "daily-planner",
+    title: "Daily Planner",
+    subtitle: "Calendar-led cadence",
+    description: "Ideal when your day is schedule-driven and you want tasks close to your timeline.",
+    requiredWidgets: ["search", "calendar"],
+    reactivePreset: "focus",
+    previewStrategy: "deep-work",
+  },
+  {
+    id: "weather-brief",
+    title: "Weather Brief",
+    subtitle: "Conditions-first dashboard",
+    description: "Puts weather forward for quick decisions; homelab can join if enabled.",
+    requiredWidgets: ["search", "weather"],
+    reactivePreset: "dense",
+    previewStrategy: "signal-hub",
+  },
+  {
+    id: "bookmark-flow",
+    title: "Bookmark Flow",
+    subtitle: "Link-heavy workflow",
+    description: "Optimized for users who rely on bookmarks and frequent lookup.",
+    requiredWidgets: ["search", "bookmarks"],
+    reactivePreset: "balanced",
+    previewStrategy: "research-desk",
+  },
+  {
+    id: "deep-work",
+    title: "Deep Work Flow",
+    subtitle: "Task-first dashboard",
+    description: "Prioritizes tasks and calendar in the primary area with search always leading.",
+    requiredWidgets: ["search", "tasks", "calendar"],
+    reactivePreset: "focus",
+    previewStrategy: "deep-work",
+  },
+  {
+    id: "signal-hub",
+    title: "Signal Hub",
+    subtitle: "Quick info board",
+    description: "Brings weather forward for instant checks; homelab appears when enabled.",
+    requiredWidgets: ["search", "weather"],
+    reactivePreset: "dense",
+    previewStrategy: "signal-hub",
+  },
+  {
+    id: "research-desk",
+    title: "Research Desk",
+    subtitle: "Reading and retrieval",
+    description: "Centers search and bookmarks, with context cards arranged for information gathering.",
+    requiredWidgets: ["search", "bookmarks", "quotes"],
+    reactivePreset: "balanced",
+    previewStrategy: "research-desk",
+  },
+  {
+    id: "ops-center",
+    title: "Ops Center",
+    subtitle: "Work + infrastructure",
+    description: "Blends tasks with live conditions; homelab automatically joins if enabled.",
+    requiredWidgets: ["search", "tasks", "weather"],
+    reactivePreset: "dense",
+    previewStrategy: "ops-center",
+  },
+  {
+    id: "everything",
+    title: "Everything Board",
+    subtitle: "Full control surface",
+    description: "Balanced whole-stack board that gives all enabled widgets intentional space.",
+    requiredWidgets: [...ALL_WIDGETS],
+    reactivePreset: "dense",
+    previewStrategy: "everything",
+  },
+];
+
+const PREVIEW_TILE_LABELS: Record<TileItem["type"], string> = {
+  greeting: "Greeting",
+  search: "Search",
+  bookmarks: "Bookmarks",
+  quotes: "Quotes/News",
+  tasks: "Tasks",
+  calendar: "Calendar",
+  weather: "Weather",
+  homelab: "Homelab",
+};
+
+const PREVIEW_TILE_COLORS: Record<TileItem["type"], { bg: string; border: string; text: string }> = {
+  greeting: {
+    bg: "color-mix(in srgb, #8b5cf6 24%, transparent)",
+    border: "color-mix(in srgb, #8b5cf6 52%, transparent)",
+    text: "color-mix(in srgb, #e9d5ff 92%, var(--theme-text) 8%)",
+  },
+  search: {
+    bg: "color-mix(in srgb, #3b82f6 24%, transparent)",
+    border: "color-mix(in srgb, #3b82f6 52%, transparent)",
+    text: "color-mix(in srgb, #dbeafe 92%, var(--theme-text) 8%)",
+  },
+  bookmarks: {
+    bg: "color-mix(in srgb, #f59e0b 22%, transparent)",
+    border: "color-mix(in srgb, #f59e0b 52%, transparent)",
+    text: "color-mix(in srgb, #fef3c7 94%, var(--theme-text) 6%)",
+  },
+  quotes: {
+    bg: "color-mix(in srgb, #ec4899 20%, transparent)",
+    border: "color-mix(in srgb, #ec4899 50%, transparent)",
+    text: "color-mix(in srgb, #fce7f3 92%, var(--theme-text) 8%)",
+  },
+  tasks: {
+    bg: "color-mix(in srgb, #22c55e 22%, transparent)",
+    border: "color-mix(in srgb, #22c55e 52%, transparent)",
+    text: "color-mix(in srgb, #dcfce7 92%, var(--theme-text) 8%)",
+  },
+  calendar: {
+    bg: "color-mix(in srgb, #06b6d4 20%, transparent)",
+    border: "color-mix(in srgb, #06b6d4 50%, transparent)",
+    text: "color-mix(in srgb, #cffafe 92%, var(--theme-text) 8%)",
+  },
+  weather: {
+    bg: "color-mix(in srgb, #f97316 20%, transparent)",
+    border: "color-mix(in srgb, #f97316 50%, transparent)",
+    text: "color-mix(in srgb, #ffedd5 94%, var(--theme-text) 6%)",
+  },
+  homelab: {
+    bg: "color-mix(in srgb, #14b8a6 22%, transparent)",
+    border: "color-mix(in srgb, #14b8a6 52%, transparent)",
+    text: "color-mix(in srgb, #ccfbf1 92%, var(--theme-text) 8%)",
+  },
+};
+
+function resolveAvailablePresetProfiles(selectedWidgets: OnboardingWidgetId[]): PresetProfileDefinition[] {
+  const selected = new Set(selectedWidgets);
+  const available = PRESET_PROFILES.filter((profile) =>
+    profile.requiredWidgets.every((widget) => selected.has(widget))
+  );
+  if (selectedWidgets.length >= 3 && selectedWidgets.length <= 4) {
+    const spotlightProfiles = buildSpotlightPresetProfiles(selectedWidgets);
+    const merged: PresetProfileDefinition[] = [];
+    for (const spotlight of spotlightProfiles) {
+      merged.push(spotlight);
+    }
+    for (const profile of available) {
+      if (merged.some((item) => item.id === profile.id)) continue;
+      merged.push(profile);
+    }
+    return dedupePresetProfiles(merged);
+  }
+  return dedupePresetProfiles(available);
+}
+
+function normalizePresetSelection(answers: OnboardingAnswers): OnboardingAnswers {
+  const available = resolveAvailablePresetProfiles(answers.selectedWidgets);
+  const current = available.find((profile) => profile.id === answers.presetProfileId) ?? available[0];
+  if (!current) return answers;
+  if (answers.presetProfileId === current.id && answers.presetLayout === current.reactivePreset) return answers;
+  return {
+    ...answers,
+    presetProfileId: current.id,
+    presetLayout: current.reactivePreset,
+  };
+}
+
+function getPresetProfileLabel(profileId: OnboardingPresetProfileId): string {
+  return (
+    PRESET_PROFILES.find((profile) => profile.id === profileId)?.title ??
+    SPOTLIGHT_ID_TO_TITLE[profileId] ??
+    "Preset layout"
+  );
+}
+
+const SPOTLIGHT_PRESET_IDS: Array<OnboardingPresetProfileId> = ["spotlight-a", "spotlight-b", "spotlight-c"];
+const SPOTLIGHT_ID_TO_TITLE: Partial<Record<OnboardingPresetProfileId, string>> = {
+  "spotlight-a": "Widget Spotlight A",
+  "spotlight-b": "Widget Spotlight B",
+  "spotlight-c": "Widget Spotlight C",
+};
+
+function widgetPriority(widget: OnboardingWidgetId): number {
+  const ranking: Record<OnboardingWidgetId, number> = {
+    tasks: 100,
+    weather: 96,
+    calendar: 92,
+    bookmarks: 88,
+    quotes: 84,
+    homelab: 82,
+    greeting: 72,
+    search: 64,
+  };
+  return ranking[widget];
+}
+
+function buildSpotlightPresetProfiles(selectedWidgets: OnboardingWidgetId[]): PresetProfileDefinition[] {
+  const focusCandidates: OnboardingWidgetId[] = [...selectedWidgets]
+    .filter((widget) => widget !== "search")
+    .sort((a, b) => widgetPriority(b) - widgetPriority(a)) as OnboardingWidgetId[];
+  if (focusCandidates.length === 0 && selectedWidgets.includes("search")) focusCandidates.push("search");
+  while (focusCandidates.length < 3) {
+    focusCandidates.push(focusCandidates[focusCandidates.length - 1] ?? "search");
+  }
+  const topFocuses = focusCandidates.slice(0, 3);
+  return topFocuses.map((focusWidget, index) => {
+    const spotlightId = SPOTLIGHT_PRESET_IDS[index]!;
+    return {
+      id: spotlightId,
+      title: `${PREVIEW_TILE_LABELS[focusWidget]} Spotlight`,
+      subtitle: "Feature-first layout",
+      description: `Highlights ${PREVIEW_TILE_LABELS[focusWidget]} as the main top widget with compact support cards.`,
+      requiredWidgets: [focusWidget],
+      reactivePreset: index === 0 ? "focus" : index === 1 ? "dense" : "balanced",
+      previewStrategy: "spotlight",
+      focusWidget,
+      compactSearch: index !== 0,
+    };
+  });
+}
+
+function previewWeightForPreset(
+  strategy: PresetPreviewStrategy,
+  type: TileItem["type"],
+  focusWidget?: OnboardingWidgetId
+): number {
+  if (strategy === "spotlight") {
+    if (focusWidget && type === focusWidget) return 130;
+    if (type === "search") return 95;
+    return 70 - widgetPriority(type as OnboardingWidgetId) * 0.05;
+  }
+  const byStrategy: Record<PresetPreviewStrategy, Record<TileItem["type"], number>> = {
+    starter: {
+      search: 100,
+      greeting: 90,
+      tasks: 80,
+      calendar: 75,
+      bookmarks: 70,
+      weather: 65,
+      quotes: 60,
+      homelab: 55,
+    },
+    "deep-work": {
+      search: 110,
+      tasks: 100,
+      calendar: 95,
+      bookmarks: 85,
+      greeting: 70,
+      quotes: 60,
+      weather: 50,
+      homelab: 40,
+    },
+    "signal-hub": {
+      search: 110,
+      weather: 100,
+      homelab: 96,
+      calendar: 86,
+      bookmarks: 82,
+      quotes: 78,
+      tasks: 75,
+      greeting: 62,
+    },
+    "research-desk": {
+      search: 110,
+      bookmarks: 102,
+      quotes: 92,
+      calendar: 78,
+      tasks: 72,
+      greeting: 68,
+      weather: 58,
+      homelab: 52,
+    },
+    "ops-center": {
+      search: 110,
+      tasks: 100,
+      weather: 96,
+      homelab: 92,
+      calendar: 84,
+      bookmarks: 78,
+      quotes: 64,
+      greeting: 58,
+    },
+    everything: {
+      search: 110,
+      tasks: 98,
+      calendar: 94,
+      weather: 90,
+      homelab: 88,
+      bookmarks: 84,
+      quotes: 80,
+      greeting: 76,
+    },
+    spotlight: {
+      search: 95,
+      tasks: 90,
+      calendar: 88,
+      weather: 86,
+      bookmarks: 84,
+      quotes: 82,
+      homelab: 80,
+      greeting: 78,
+    },
+  };
+  return byStrategy[strategy][type];
+}
+
+function previewSpanForPreset(
+  strategy: PresetPreviewStrategy,
+  type: TileItem["type"],
+  indexWithinType: number,
+  focusWidget?: OnboardingWidgetId,
+  compactSearch?: boolean
+): { colSpan: number; rowSpan: number } {
+  const firstSearch = indexWithinType === 0;
+  if (strategy === "spotlight") {
+    if (focusWidget && type === focusWidget) return { colSpan: 8, rowSpan: 3 };
+    if (type === "search") {
+      if (!firstSearch) return { colSpan: compactSearch ? 3 : 4, rowSpan: 1 };
+      return { colSpan: compactSearch ? 4 : 6, rowSpan: 1 };
+    }
+    if (type === "greeting") return { colSpan: 4, rowSpan: 1 };
+    if (type === "homelab") return { colSpan: 6, rowSpan: 2 };
+    return { colSpan: 4, rowSpan: 2 };
+  }
+  const byStrategy: Record<PresetPreviewStrategy, Record<TileItem["type"], { colSpan: number; rowSpan: number }>> = {
+    starter: {
+      greeting: { colSpan: 6, rowSpan: 1 },
+      search: { colSpan: firstSearch ? 12 : 4, rowSpan: 1 },
+      bookmarks: { colSpan: 6, rowSpan: 2 },
+      quotes: { colSpan: 6, rowSpan: 2 },
+      tasks: { colSpan: 6, rowSpan: 2 },
+      calendar: { colSpan: 6, rowSpan: 2 },
+      weather: { colSpan: 6, rowSpan: 2 },
+      homelab: { colSpan: 12, rowSpan: 2 },
+    },
+    "deep-work": {
+      greeting: { colSpan: 4, rowSpan: 1 },
+      search: { colSpan: firstSearch ? 12 : 6, rowSpan: 1 },
+      bookmarks: { colSpan: 8, rowSpan: 2 },
+      quotes: { colSpan: 4, rowSpan: 2 },
+      tasks: { colSpan: 8, rowSpan: 3 },
+      calendar: { colSpan: 4, rowSpan: 3 },
+      weather: { colSpan: 4, rowSpan: 2 },
+      homelab: { colSpan: 12, rowSpan: 1 },
+    },
+    "signal-hub": {
+      greeting: { colSpan: 4, rowSpan: 1 },
+      search: { colSpan: firstSearch ? 12 : 4, rowSpan: 1 },
+      bookmarks: { colSpan: 4, rowSpan: 2 },
+      quotes: { colSpan: 4, rowSpan: 2 },
+      tasks: { colSpan: 4, rowSpan: 2 },
+      calendar: { colSpan: 4, rowSpan: 2 },
+      weather: { colSpan: 4, rowSpan: 2 },
+      homelab: { colSpan: 8, rowSpan: 2 },
+    },
+    "research-desk": {
+      greeting: { colSpan: 4, rowSpan: 1 },
+      search: { colSpan: firstSearch ? 12 : 4, rowSpan: 1 },
+      bookmarks: { colSpan: 8, rowSpan: 3 },
+      quotes: { colSpan: 4, rowSpan: 3 },
+      tasks: { colSpan: 4, rowSpan: 2 },
+      calendar: { colSpan: 4, rowSpan: 2 },
+      weather: { colSpan: 4, rowSpan: 2 },
+      homelab: { colSpan: 8, rowSpan: 2 },
+    },
+    "ops-center": {
+      greeting: { colSpan: 4, rowSpan: 1 },
+      search: { colSpan: firstSearch ? 12 : 4, rowSpan: 1 },
+      bookmarks: { colSpan: 4, rowSpan: 2 },
+      quotes: { colSpan: 4, rowSpan: 2 },
+      tasks: { colSpan: 6, rowSpan: 3 },
+      calendar: { colSpan: 6, rowSpan: 2 },
+      weather: { colSpan: 4, rowSpan: 2 },
+      homelab: { colSpan: 8, rowSpan: 2 },
+    },
+    everything: {
+      greeting: { colSpan: 4, rowSpan: 1 },
+      search: { colSpan: firstSearch ? 12 : 4, rowSpan: 1 },
+      bookmarks: { colSpan: 4, rowSpan: 2 },
+      quotes: { colSpan: 4, rowSpan: 2 },
+      tasks: { colSpan: 4, rowSpan: 2 },
+      calendar: { colSpan: 4, rowSpan: 2 },
+      weather: { colSpan: 4, rowSpan: 2 },
+      homelab: { colSpan: 8, rowSpan: 2 },
+    },
+    spotlight: {
+      greeting: { colSpan: 4, rowSpan: 1 },
+      search: { colSpan: firstSearch ? 6 : 4, rowSpan: 1 },
+      bookmarks: { colSpan: 4, rowSpan: 2 },
+      quotes: { colSpan: 4, rowSpan: 2 },
+      tasks: { colSpan: 4, rowSpan: 2 },
+      calendar: { colSpan: 4, rowSpan: 2 },
+      weather: { colSpan: 4, rowSpan: 2 },
+      homelab: { colSpan: 6, rowSpan: 2 },
+    },
+  };
+  return byStrategy[strategy][type];
+}
+
+function buildPreviewLayout(baseLayout: TileItem[], profile: PresetProfileDefinition): TileItem[] {
+  const strategy = profile.previewStrategy;
+  const cols = PRESET_PREVIEW_CONFIG.cols;
+  const occupancy = new Set<string>();
+  const typeCounts = new Map<TileItem["type"], number>();
+  const tiles = baseLayout
+    .map((tile) => ({ ...tile }))
+    .sort((a, b) => {
+      const weightDiff =
+        previewWeightForPreset(strategy, b.type, profile.focusWidget) -
+        previewWeightForPreset(strategy, a.type, profile.focusWidget);
+      if (weightDiff !== 0) return weightDiff;
+      return a.id.localeCompare(b.id);
+    });
+
+  const canPlace = (colStart: number, rowStart: number, colSpan: number, rowSpan: number): boolean => {
+    for (let row = rowStart; row < rowStart + rowSpan; row += 1) {
+      for (let col = colStart; col < colStart + colSpan; col += 1) {
+        if (occupancy.has(`${row}:${col}`)) return false;
+      }
+    }
+    return true;
+  };
+
+  const markPlaced = (colStart: number, rowStart: number, colSpan: number, rowSpan: number) => {
+    for (let row = rowStart; row < rowStart + rowSpan; row += 1) {
+      for (let col = colStart; col < colStart + colSpan; col += 1) {
+        occupancy.add(`${row}:${col}`);
+      }
+    }
+  };
+
+  return tiles.map((tile) => {
+    const indexWithinType = typeCounts.get(tile.type) ?? 0;
+    typeCounts.set(tile.type, indexWithinType + 1);
+    const span = previewSpanForPreset(
+      strategy,
+      tile.type,
+      indexWithinType,
+      profile.focusWidget,
+      profile.compactSearch
+    );
+    const colSpan = Math.max(1, Math.min(cols, span.colSpan));
+    const rowSpan = Math.max(1, span.rowSpan);
+    const maxColStart = cols - colSpan + 1;
+    let placedCol = 1;
+    let placedRow = 1;
+    let assigned = false;
+    for (let row = 1; row <= 60 && !assigned; row += 1) {
+      for (let col = 1; col <= maxColStart; col += 1) {
+        if (!canPlace(col, row, colSpan, rowSpan)) continue;
+        placedCol = col;
+        placedRow = row;
+        assigned = true;
+        markPlaced(col, row, colSpan, rowSpan);
+        break;
+      }
+    }
+    return {
+      ...tile,
+      colStart: placedCol,
+      rowStart: placedRow,
+      colSpan,
+      rowSpan,
+    };
+  });
+}
+
+function presetRedundancyKey(profile: PresetProfileDefinition): string {
+  return `${profile.previewStrategy}|${profile.focusWidget ?? "none"}|${profile.compactSearch ? "compact" : "regular"}`;
+}
+
+function dedupePresetProfiles(profiles: PresetProfileDefinition[]): PresetProfileDefinition[] {
+  const seen = new Set<string>();
+  const deduped: PresetProfileDefinition[] = [];
+  for (const profile of profiles) {
+    const key = presetRedundancyKey(profile);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(profile);
+  }
+  return deduped;
+}
+
+function sortTileItems(layout: TileItem[]): TileItem[] {
+  return [...layout].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function areTileLayoutsEqual(a: TileItem[], b: TileItem[]): boolean {
+  if (a.length !== b.length) return false;
+  const left = sortTileItems(a);
+  const right = sortTileItems(b);
+  return left.every((tile, idx) => {
+    const other = right[idx]!;
+    return (
+      tile.id === other.id &&
+      tile.type === other.type &&
+      tile.colStart === other.colStart &&
+      tile.rowStart === other.rowStart &&
+      tile.colSpan === other.colSpan &&
+      tile.rowSpan === other.rowSpan
+    );
+  });
+}
+
+function reconcilePresetLayout(base: TileItem[], override: TileItem[] | undefined): TileItem[] {
+  if (!override || override.length === 0) return base;
+  const map = new Map(override.map((tile) => [tile.id, tile]));
+  return base.map((tile) => {
+    const patched = map.get(tile.id);
+    if (!patched) return tile;
+    return {
+      ...tile,
+      colStart: patched.colStart,
+      rowStart: patched.rowStart,
+      colSpan: patched.colSpan,
+      rowSpan: patched.rowSpan,
+    };
+  });
+}
+
+function hasTileOverlap(layout: TileItem[]): boolean {
+  for (let i = 0; i < layout.length; i += 1) {
+    const left = layout[i]!;
+    const leftRight = left.colStart + left.colSpan - 1;
+    const leftBottom = left.rowStart + left.rowSpan - 1;
+    for (let j = i + 1; j < layout.length; j += 1) {
+      const right = layout[j]!;
+      const rightRight = right.colStart + right.colSpan - 1;
+      const rightBottom = right.rowStart + right.rowSpan - 1;
+      const overlaps = !(
+        leftRight < right.colStart ||
+        rightRight < left.colStart ||
+        leftBottom < right.rowStart ||
+        rightBottom < left.rowStart
+      );
+      if (overlaps) return true;
+    }
+  }
+  return false;
+}
+
 export default function OnboardingWizard({
   open,
   theme,
@@ -212,6 +796,18 @@ export default function OnboardingWizard({
   onThemeRandomize,
   onWallpaperChange,
 }: OnboardingWizardProps) {
+  type PreviewInteractionMode = "move" | "resize";
+  interface PreviewInteractionState {
+    profileId: string;
+    tileId: string;
+    mode: PreviewInteractionMode;
+    startX: number;
+    startY: number;
+    startTile: TileItem;
+    startLayout: TileItem[];
+    colStep: number;
+    rowStep: number;
+  }
   const [stepId, setStepId] = useState<OnboardingStepId>("welcome");
   const [answers, setAnswers] = useState<OnboardingAnswers>(() => createDefaultOnboardingAnswers());
   const [bookmarkTree, setBookmarkTree] = useState<BookmarkTreeFolderNode[]>([]);
@@ -227,13 +823,30 @@ export default function OnboardingWizard({
   const [expandedFolderIds, setExpandedFolderIds] = useState<string[]>([]);
   const [hasVisitedReview, setHasVisitedReview] = useState(false);
   const [wizardError, setWizardError] = useState("");
+  const [presetPreviewOverrides, setPresetPreviewOverrides] = useState<Record<string, TileItem[]>>({});
+  const previewInteractionRef = useRef<PreviewInteractionState | null>(null);
+  const presetDefaultLayoutsRef = useRef<Record<string, TileItem[]>>({});
   const globePhiRef = useRef(0);
   const globeThetaRef = useRef(0);
   const globeScaleRef = useRef(1.08);
+  const globeAnimationFrameRef = useRef<number | null>(null);
+  const longitudeToPhi = (lon: number): number => -((lon + 90) * Math.PI) / 180;
+  const latitudeToTheta = (lat: number): number => (lat * Math.PI) / 180;
 
   const searchSources = useMemo(
     () => getAvailableSearchSources(loadCustomSearchSources()),
     []
+  );
+  const availablePresetProfiles = useMemo(
+    () => resolveAvailablePresetProfiles(answers.selectedWidgets),
+    [answers.selectedWidgets]
+  );
+  const activePresetProfile = useMemo(
+    () =>
+      availablePresetProfiles.find((profile) => profile.id === answers.presetProfileId) ??
+      availablePresetProfiles[0] ??
+      null,
+    [availablePresetProfiles, answers.presetProfileId]
   );
   const stepRail = useMemo(() => getStepRail(answers), [answers]);
   const stepIndex = Math.max(0, stepRail.indexOf(stepId));
@@ -243,6 +856,103 @@ export default function OnboardingWizard({
     typeof value === "number" && Number.isFinite(value);
   const formatCoordinate = (value: unknown): string =>
     typeof value === "number" && Number.isFinite(value) ? value.toFixed(3) : "—";
+
+  const applyPresetOverride = (profileId: string, layout: TileItem[]) => {
+    const defaultLayout = presetDefaultLayoutsRef.current[profileId];
+    if (defaultLayout && areTileLayoutsEqual(layout, defaultLayout)) {
+      setPresetPreviewOverrides((prev) => {
+        if (!prev[profileId]) return prev;
+        const next = { ...prev };
+        delete next[profileId];
+        return next;
+      });
+      return;
+    }
+    setPresetPreviewOverrides((prev) => ({ ...prev, [profileId]: layout }));
+  };
+
+  const startPresetInteraction = (
+    event: ReactMouseEvent,
+    profileId: string,
+    tile: TileItem,
+    layout: TileItem[],
+    mode: PreviewInteractionMode
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const target = event.currentTarget as HTMLElement;
+    const grid = target.parentElement;
+    const config = PRESET_PREVIEW_CONFIG;
+    const usableWidth = Math.max(120, (grid?.clientWidth ?? 220) - (config.cols - 1) * config.gap);
+    const colWidth = usableWidth / config.cols;
+    previewInteractionRef.current = {
+      profileId,
+      tileId: tile.id,
+      mode,
+      startX: event.clientX,
+      startY: event.clientY,
+      startTile: { ...tile },
+      startLayout: layout.map((item) => ({ ...item })),
+      colStep: colWidth + config.gap,
+      rowStep: config.rowHeight + config.gap,
+    };
+    if (typeof document !== "undefined") {
+      document.body.style.cursor = mode === "resize" ? "nwse-resize" : "grabbing";
+    }
+  };
+
+  useEffect(() => {
+    const onPointerMove = (event: MouseEvent) => {
+      const interaction = previewInteractionRef.current;
+      if (!interaction) return;
+      const deltaX = event.clientX - interaction.startX;
+      const deltaY = event.clientY - interaction.startY;
+      const config = PRESET_PREVIEW_CONFIG;
+      const deltaCols = Math.round(deltaX / Math.max(1, interaction.colStep));
+      const deltaRows = Math.round(deltaY / Math.max(1, interaction.rowStep));
+      const nextLayout = interaction.startLayout.map((tile) => {
+        if (tile.id !== interaction.tileId) return tile;
+        if (interaction.mode === "move") {
+          const nextColStart = Math.max(1, Math.min(config.cols, interaction.startTile.colStart + deltaCols));
+          const nextRowStart = Math.max(1, interaction.startTile.rowStart + deltaRows);
+          return { ...tile, colStart: nextColStart, rowStart: nextRowStart };
+        }
+        const nextColSpan = Math.max(1, Math.min(config.cols, interaction.startTile.colSpan + deltaCols));
+        const nextRowSpan = Math.max(1, interaction.startTile.rowSpan + deltaRows);
+        const clampedColSpan = Math.min(nextColSpan, config.cols - tile.colStart + 1);
+        return { ...tile, colSpan: clampedColSpan, rowSpan: nextRowSpan };
+      });
+      applyPresetOverride(interaction.profileId, nextLayout);
+      if (typeof document !== "undefined") {
+        document.body.style.cursor = interaction.mode === "resize" ? "nwse-resize" : "grabbing";
+      }
+    };
+
+    const onPointerUp = () => {
+      previewInteractionRef.current = null;
+      if (typeof document !== "undefined") {
+        document.body.style.cursor = "";
+      }
+    };
+
+    window.addEventListener("mousemove", onPointerMove);
+    window.addEventListener("mouseup", onPointerUp);
+    return () => {
+      window.removeEventListener("mousemove", onPointerMove);
+      window.removeEventListener("mouseup", onPointerUp);
+      if (typeof document !== "undefined") {
+        document.body.style.cursor = "";
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (globeAnimationFrameRef.current !== null) {
+        window.cancelAnimationFrame(globeAnimationFrameRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -270,7 +980,8 @@ export default function OnboardingWizard({
       newsCustomRssUrl,
       bookmarks: bookmarks ?? createDefaultOnboardingAnswers().bookmarks,
     } satisfies OnboardingAnswers;
-    setAnswers(draft ? { ...baseAnswers, ...draft.answers } : baseAnswers);
+    const seededAnswers = draft ? { ...baseAnswers, ...draft.answers } : baseAnswers;
+    setAnswers(normalizePresetSelection(seededAnswers));
     setStepId(draft?.stepId ?? "welcome");
     setCityQuery("");
     setCityResults([]);
@@ -279,19 +990,31 @@ export default function OnboardingWizard({
     setCustomWallpaperUrl("");
     setExpandedFolderIds(["1"]);
     setHasVisitedReview(false);
+    setPresetPreviewOverrides({});
     const draftAnswers = draft?.answers;
     const initialLatCandidate = draftAnswers?.weather.customLat ?? weather.customLat;
     const initialLonCandidate = draftAnswers?.weather.customLon ?? weather.customLon;
     const initLat = isFiniteNumber(initialLatCandidate) ? initialLatCandidate : 0;
     const initLon = isFiniteNumber(initialLonCandidate) ? initialLonCandidate : 0;
-    globePhiRef.current = -(initLon * Math.PI) / 180;
-    globeThetaRef.current = -(initLat * Math.PI) / 180;
+    globePhiRef.current = longitudeToPhi(initLon);
+    globeThetaRef.current = latitudeToTheta(initLat);
     globeScaleRef.current = 1.08;
   }, [open]);
 
   useEffect(() => {
     if (stepId === "review") setHasVisitedReview(true);
   }, [stepId]);
+
+  useEffect(() => {
+    const normalized = normalizePresetSelection(answers);
+    if (
+      normalized.presetProfileId === answers.presetProfileId &&
+      normalized.presetLayout === answers.presetLayout
+    ) {
+      return;
+    }
+    setAnswers(normalized);
+  }, [answers]);
 
   useEffect(() => {
     if (!open || stepId !== "bookmarks") return;
@@ -373,41 +1096,69 @@ export default function OnboardingWizard({
     return normalizedLayout;
   };
 
+  const activePresetHasOverlap = useMemo(() => {
+    if (!activePresetProfile) return false;
+    const baseLayout = buildLayoutFromAnswers();
+    const defaultPreview = buildPreviewLayout(baseLayout, activePresetProfile);
+    const effectivePreview = reconcilePresetLayout(defaultPreview, presetPreviewOverrides[activePresetProfile.id]);
+    return hasTileOverlap(effectivePreview);
+  }, [activePresetProfile, answers, presetPreviewOverrides]);
+
   const persistSelections = (nextStep: OnboardingStepId): boolean => {
     try {
+      const answersForPersist = normalizePresetSelection(answers);
+      if (
+        answersForPersist.presetProfileId !== answers.presetProfileId ||
+        answersForPersist.presetLayout !== answers.presetLayout
+      ) {
+        setAnswers(answersForPersist);
+      }
+      const baseLayout = buildLayoutFromAnswers();
       const layoutConfig = loadLayoutConfig(widgetConstraints);
-      layoutConfig.reactive.layout = buildLayoutFromAnswers();
-      if (answers.path === "preset") {
+      layoutConfig.reactive.layout = baseLayout;
+      if (answersForPersist.path === "preset") {
         layoutConfig.mode = "reactive";
-        layoutConfig.reactive.preset = answers.presetLayout;
-        const preset = REACTIVE_PRESETS.find((item) => item.id === answers.presetLayout);
+        const selectedProfile = resolveAvailablePresetProfiles(answersForPersist.selectedWidgets).find(
+          (profile) => profile.id === answersForPersist.presetProfileId
+        );
+        if (selectedProfile) {
+          const defaultPresetLayout = buildPreviewLayout(baseLayout, selectedProfile);
+          const appliedPresetLayout = reconcilePresetLayout(
+            defaultPresetLayout,
+            presetPreviewOverrides[selectedProfile.id]
+          );
+          layoutConfig.reactive.layout = appliedPresetLayout;
+        }
+        const presetToUse = selectedProfile?.reactivePreset ?? answersForPersist.presetLayout;
+        layoutConfig.reactive.preset = presetToUse;
+        const preset = REACTIVE_PRESETS.find((item) => item.id === presetToUse);
         layoutConfig.reactive.preferredGridCols = preset?.recommendedMaxCols ?? 12;
-      } else if (answers.path === "custom") {
+      } else if (answersForPersist.path === "custom") {
         layoutConfig.mode = "reactive";
-        const mapped = densityToPreset(answers.customDensity);
+        const mapped = densityToPreset(answersForPersist.customDensity);
         layoutConfig.reactive.preset = mapped.preset;
         layoutConfig.reactive.preferredGridCols = mapped.cols;
       }
       saveLayoutConfig(layoutConfig);
 
       saveWeatherSettings({
-        unit: answers.weather.unit,
-        customLat: isFiniteNumber(answers.weather.customLat) ? answers.weather.customLat : undefined,
-        customLon: isFiniteNumber(answers.weather.customLon) ? answers.weather.customLon : undefined,
-        customCity: answers.weather.customCity,
+        unit: answersForPersist.weather.unit,
+        customLat: isFiniteNumber(answersForPersist.weather.customLat) ? answersForPersist.weather.customLat : undefined,
+        customLon: isFiniteNumber(answersForPersist.weather.customLon) ? answersForPersist.weather.customLon : undefined,
+        customCity: answersForPersist.weather.customCity,
       });
 
-      if (answers.calendarUrl.trim()) {
-        storeIcalUrl(answers.calendarUrl.trim());
+      if (answersForPersist.calendarUrl.trim()) {
+        storeIcalUrl(answersForPersist.calendarUrl.trim());
       }
 
-      localStorage.setItem("dashboard-quote-category", answers.quoteCategoryId);
-      localStorage.setItem(NEWS_SOURCE_KEY, answers.newsSourceId);
-      localStorage.setItem(NEWS_CUSTOM_RSS_KEY, answers.newsCustomRssUrl.trim());
-      onWallpaperChange(answers.wallpaperUrl);
-      saveQuotesDefaultMode(answers.contentMode);
-      saveBookmarkSyncScope(answers.bookmarks);
-      saveOnboardingDraft(nextStep, answers);
+      localStorage.setItem("dashboard-quote-category", answersForPersist.quoteCategoryId);
+      localStorage.setItem(NEWS_SOURCE_KEY, answersForPersist.newsSourceId);
+      localStorage.setItem(NEWS_CUSTOM_RSS_KEY, answersForPersist.newsCustomRssUrl.trim());
+      onWallpaperChange(answersForPersist.wallpaperUrl);
+      saveQuotesDefaultMode(answersForPersist.contentMode);
+      saveBookmarkSyncScope(answersForPersist.bookmarks);
+      saveOnboardingDraft(nextStep, answersForPersist);
       setWizardError("");
       return true;
     } catch (error) {
@@ -447,6 +1198,7 @@ export default function OnboardingWizard({
 
   const canContinue = (() => {
     if (stepId === "path") return answers.path !== null;
+    if (stepId === "presetLayout") return availablePresetProfiles.length > 0 && !activePresetHasOverlap;
     if (stepId === "contentMode" && answers.contentMode === "news" && answers.newsSourceId === NEWS_CUSTOM_SOURCE_ID) {
       return Boolean(answers.newsCustomRssUrl.trim());
     }
@@ -454,12 +1206,12 @@ export default function OnboardingWizard({
   })();
 
   const skipWidgetStep = (widget: OnboardingWidgetId) => {
-    const nextAnswers: OnboardingAnswers = {
+    const nextAnswers = normalizePresetSelection({
       ...answers,
       selectedWidgets: answers.selectedWidgets.filter((item) => item !== widget),
       ...(widget === "search" ? { searchBars: [] } : {}),
       ...(widget === "quotes" ? { contentMode: "quotes" as OnboardingContentMode } : {}),
-    };
+    });
     const oldRail = stepRail;
     const currentIdx = oldRail.indexOf(stepId);
     const newRail = getStepRail(nextAnswers);
@@ -514,10 +1266,72 @@ export default function OnboardingWizard({
     setCityLoading(false);
   };
 
+  const stopGlobeAnimation = () => {
+    if (globeAnimationFrameRef.current === null) return;
+    window.cancelAnimationFrame(globeAnimationFrameRef.current);
+    globeAnimationFrameRef.current = null;
+  };
+
+  const animateGlobeTo = (
+    lat: number,
+    lon: number,
+    options?: {
+      durationMs?: number;
+      spinTurns?: number;
+      spinRevolutions?: number;
+      targetScale?: number;
+    }
+  ) => {
+    stopGlobeAnimation();
+    const durationMs = options?.durationMs ?? 1700;
+    const requestedRevolutions = options?.spinRevolutions ?? options?.spinTurns ?? 1;
+    const spinRevolutions = Math.max(0, Math.round(requestedRevolutions));
+    const targetScale = options?.targetScale ?? globeScaleRef.current;
+    const twoPi = Math.PI * 2;
+    const wrapToPi = (angle: number) => ((angle + Math.PI) % twoPi + twoPi) % twoPi - Math.PI;
+
+    const startPhi = globePhiRef.current;
+    const startTheta = globeThetaRef.current;
+    const startScale = globeScaleRef.current;
+    const targetTheta = latitudeToTheta(lat);
+    const baseTargetPhi = longitudeToPhi(lon);
+    const shortestPhiDelta = wrapToPi(baseTargetPhi - startPhi);
+    const spinDirection = shortestPhiDelta >= 0 ? 1 : -1;
+    const targetPhi = startPhi + shortestPhiDelta + spinDirection * twoPi * spinRevolutions;
+
+    let startTime = 0;
+    const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+    const tick = (timestamp: number) => {
+      if (startTime === 0) startTime = timestamp;
+      const progress = Math.min(1, (timestamp - startTime) / durationMs);
+      const eased = easeInOutCubic(progress);
+      globePhiRef.current = startPhi + (targetPhi - startPhi) * eased;
+      globeThetaRef.current = startTheta + (targetTheta - startTheta) * eased;
+      globeScaleRef.current = startScale + (targetScale - startScale) * eased;
+
+      if (progress < 1) {
+        globeAnimationFrameRef.current = window.requestAnimationFrame(tick);
+      } else {
+        globePhiRef.current = targetPhi;
+        globeThetaRef.current = targetTheta;
+        globeScaleRef.current = targetScale;
+        globeAnimationFrameRef.current = null;
+      }
+    };
+
+    globeAnimationFrameRef.current = window.requestAnimationFrame(tick);
+  };
+
   const useMyLocation = () => {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
       (position) => {
+        animateGlobeTo(position.coords.latitude, position.coords.longitude, {
+          targetScale: 2.7,
+          spinRevolutions: 2,
+          durationMs: 1850,
+        });
         setAnswers((prev) => ({
           ...prev,
           weather: {
@@ -837,13 +1651,14 @@ export default function OnboardingWizard({
                 onClick={() =>
                   setAnswers((prev) => {
                     const has = prev.selectedWidgets.includes(widget.id);
-                    return {
+                    const nextAnswers: OnboardingAnswers = {
                       ...prev,
                       selectedWidgets: has
                         ? prev.selectedWidgets.filter((id) => id !== widget.id)
                         : [...prev.selectedWidgets, widget.id],
                       ...(widget.id === "search" && has ? { searchBars: [] } : {}),
                     };
+                    return normalizePresetSelection(nextAnswers);
                   })
                 }
                 className="rounded-2xl border p-4 text-left transition-colors"
@@ -866,31 +1681,156 @@ export default function OnboardingWizard({
     }
 
     if (stepId === "presetLayout") {
+      const previewBaseLayout = buildLayoutFromAnswers();
+      const missingWidgetSet = new Set<OnboardingWidgetId>();
+      for (const profile of PRESET_PROFILES) {
+        if (availablePresetProfiles.some((available) => available.id === profile.id)) continue;
+        for (const widget of profile.requiredWidgets) {
+          if (!answers.selectedWidgets.includes(widget)) missingWidgetSet.add(widget);
+        }
+      }
+      const missingWidgetList = [...missingWidgetSet];
       return (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {REACTIVE_PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              onClick={() => setAnswers((prev) => ({ ...prev, presetLayout: preset.id }))}
-              className="rounded-2xl border p-4 text-left"
-              style={{
-                borderColor:
-                  answers.presetLayout === preset.id
-                    ? "color-mix(in srgb, var(--theme-accent) 55%, transparent)"
-                    : "color-mix(in srgb, var(--theme-border) 72%, transparent)",
-                background:
-                  answers.presetLayout === preset.id
-                    ? "color-mix(in srgb, var(--theme-accent) 12%, transparent)"
-                    : "color-mix(in srgb, var(--theme-surface) 70%, transparent)",
-              }}
-            >
-              <div className="font-medium text-sm theme-text">{preset.label}</div>
-              <div className="text-xs theme-text-secondary mt-1">
-                Widget layout preset: {preset.description}
-              </div>
-            </button>
-          ))}
+        <div className="space-y-3">
+          {availablePresetProfiles.length === 0 ? (
+            <div className="rounded-2xl border p-4 text-xs theme-text-secondary">
+              Add widgets first, then presets will appear here.
+            </div>
+          ) : null}
+          {availablePresetProfiles.length > 0 ? (
+            <div className="text-[11px] theme-text-secondary">
+              Drag cards to move, use the corner handle to resize, and stack tiles freely while previewing.
+            </div>
+          ) : null}
+          <div
+            className="rounded-xl border px-3 py-2 text-[11px] min-h-[34px] flex items-center"
+            style={{
+              borderColor: activePresetHasOverlap ? "color-mix(in srgb, #ef4444 45%, transparent)" : "transparent",
+              opacity: activePresetHasOverlap ? 1 : 0,
+            }}
+            aria-live="polite"
+          >
+            Selected preset has overlapping widgets. Fix overlaps before continuing.
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {availablePresetProfiles.map((profile) => {
+              const config = PRESET_PREVIEW_CONFIG;
+              const defaultPreviewTiles = buildPreviewLayout(previewBaseLayout, profile);
+              const previewTiles = reconcilePresetLayout(defaultPreviewTiles, presetPreviewOverrides[profile.id]);
+              const edited = !areTileLayoutsEqual(defaultPreviewTiles, previewTiles);
+              const hasOverlap = hasTileOverlap(previewTiles);
+              presetDefaultLayoutsRef.current[profile.id] = defaultPreviewTiles;
+              const maxRow = previewTiles.reduce((acc, tile) => Math.max(acc, tile.rowStart + tile.rowSpan - 1), 1);
+              return (
+                <div
+                  key={profile.id}
+                  className="rounded-2xl border p-4 text-left transition-colors"
+                  style={{
+                    borderColor:
+                      hasOverlap
+                        ? "color-mix(in srgb, #ef4444 55%, transparent)"
+                        : activePresetProfile?.id === profile.id
+                        ? "color-mix(in srgb, var(--theme-accent) 55%, transparent)"
+                        : "color-mix(in srgb, var(--theme-border) 72%, transparent)",
+                    background:
+                      activePresetProfile?.id === profile.id
+                        ? "color-mix(in srgb, var(--theme-accent) 12%, transparent)"
+                        : "color-mix(in srgb, var(--theme-surface) 70%, transparent)",
+                  }}
+                  onClick={() => {
+                    if (hasOverlap) return;
+                    setAnswers((prev) => ({
+                      ...prev,
+                      presetProfileId: profile.id,
+                      presetLayout: profile.reactivePreset,
+                    }));
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-medium text-sm theme-text">{profile.title}</div>
+                    <button
+                      type="button"
+                      className="btn-ghost text-[11px] px-2 py-1 min-w-[46px]"
+                      style={{ visibility: edited ? "visible" : "hidden" }}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setPresetPreviewOverrides((prev) => {
+                          if (!prev[profile.id]) return prev;
+                          const next = { ...prev };
+                          delete next[profile.id];
+                          return next;
+                        });
+                      }}
+                    >
+                      Reset
+                    </button>
+                  </div>
+                  <div className="text-xs theme-text-secondary mt-1">{profile.subtitle}</div>
+                  <div
+                    className="mt-3 rounded-xl border p-2"
+                    style={{
+                      borderColor: "color-mix(in srgb, var(--theme-border) 55%, transparent)",
+                      background: "color-mix(in srgb, var(--theme-bg) 42%, transparent)",
+                    }}
+                  >
+                    {previewBaseLayout.length === 0 ? (
+                      <div className="text-[11px] theme-text-secondary py-5 text-center">
+                        Select at least one widget to preview this layout.
+                      </div>
+                    ) : (
+                      <div
+                        className="grid w-full select-none"
+                        style={{
+                          gridTemplateColumns: `repeat(${config.cols}, minmax(0, 1fr))`,
+                          gridTemplateRows: `repeat(${Math.max(2, maxRow)}, ${config.rowHeight}px)`,
+                          gap: `${config.gap}px`,
+                        }}
+                      >
+                        {previewTiles.map((tile, tileIndex) => (
+                          <div
+                            key={`${profile.id}-${tile.id}`}
+                            className="rounded-md border px-1.5 py-1 text-[10px] leading-none truncate relative cursor-grab"
+                            style={{
+                              gridColumn: `${tile.colStart} / span ${tile.colSpan}`,
+                              gridRow: `${tile.rowStart} / span ${Math.max(1, tile.rowSpan)}`,
+                              borderColor: PREVIEW_TILE_COLORS[tile.type].border,
+                              background: PREVIEW_TILE_COLORS[tile.type].bg,
+                              color: PREVIEW_TILE_COLORS[tile.type].text,
+                              zIndex: tileIndex + 1,
+                            }}
+                            title={PREVIEW_TILE_LABELS[tile.type]}
+                            onMouseDown={(event) => startPresetInteraction(event, profile.id, tile, previewTiles, "move")}
+                          >
+                            {PREVIEW_TILE_LABELS[tile.type]}
+                            <span
+                              className="absolute right-0.5 bottom-0.5 w-2.5 h-2.5 rounded-sm cursor-nwse-resize"
+                              style={{
+                                background: "color-mix(in srgb, var(--theme-surface) 72%, transparent)",
+                                border: "1px solid color-mix(in srgb, var(--theme-border) 65%, transparent)",
+                              }}
+                              onMouseDown={(event) => startPresetInteraction(event, profile.id, tile, previewTiles, "resize")}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div
+                    className="text-[11px] mt-2 min-h-[16px]"
+                    style={{ color: hasOverlap ? "#ef4444" : "transparent" }}
+                  >
+                    Overlap detected. Rearrange or resize tiles before selecting.
+                  </div>
+                  <div className="text-[11px] theme-text-secondary mt-2">{profile.description}</div>
+                </div>
+              );
+            })}
+          </div>
+          {missingWidgetList.length > 0 ? (
+            <div className="rounded-xl border px-3 py-2 text-[11px] theme-text-secondary">
+              More presets unlock when you enable more widgets: {missingWidgetList.join(", ")}
+            </div>
+          ) : null}
         </div>
       );
     }
@@ -1444,15 +2384,19 @@ export default function OnboardingWizard({
                   type="button"
                   className="text-left rounded-lg px-2 py-1 hover:bg-black/[0.03] dark:hover:bg-white/[0.04]"
                   onClick={() =>
-                    setAnswers((prev) => ({
-                      ...prev,
-                      weather: {
-                        ...prev.weather,
-                        customLat: result.latitude,
-                        customLon: result.longitude,
-                        customCity: `${result.name}${result.admin1 ? `, ${result.admin1}` : ""}, ${result.country}`,
-                      },
-                    }))
+                    {
+                      globePhiRef.current = longitudeToPhi(result.longitude);
+                      globeThetaRef.current = latitudeToTheta(result.latitude);
+                      setAnswers((prev) => ({
+                        ...prev,
+                        weather: {
+                          ...prev.weather,
+                          customLat: result.latitude,
+                          customLon: result.longitude,
+                          customCity: `${result.name}${result.admin1 ? `, ${result.admin1}` : ""}, ${result.country}`,
+                        },
+                      }));
+                    }
                   }
                 >
                   <span className="text-xs theme-text">
@@ -1655,7 +2599,7 @@ export default function OnboardingWizard({
           <div className="font-medium theme-text mb-1">Layout</div>
           <div className="text-xs theme-text-secondary">
             {answers.path === "preset"
-              ? `Preset: ${answers.presetLayout}`
+              ? `Preset: ${getPresetProfileLabel(answers.presetProfileId)}`
               : `Custom density: ${answers.customDensity}`}
           </div>
           {stepRail.includes(answers.path === "preset" ? "presetLayout" : "customLayout") ? (

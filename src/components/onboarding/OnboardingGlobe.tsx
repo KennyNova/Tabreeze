@@ -80,8 +80,8 @@ export default function OnboardingGlobe({
     frameId = window.requestAnimationFrame(renderFrame);
 
     const emitCoordinates = () => {
-      const lon = Number((((-phiRef.current * 180) / Math.PI + 540) % 360 - 180).toFixed(4));
-      const lat = Number(Math.max(-85, Math.min(85, (-thetaRef.current * 180) / Math.PI)).toFixed(4));
+      const lon = Number((((-phiRef.current * 180) / Math.PI - 90 + 540) % 360 - 180).toFixed(4));
+      const lat = Number(Math.max(-85, Math.min(85, (thetaRef.current * 180) / Math.PI)).toFixed(4));
       onCoordinatesChangeRef.current(lat, lon);
     };
 
