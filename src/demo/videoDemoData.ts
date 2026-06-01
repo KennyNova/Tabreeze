@@ -220,6 +220,8 @@ function applyVideoDemoData(force = false) {
   });
 
   localStorage.setItem("dashboard-quote-category", "inspirational");
+  localStorage.setItem("dashboard-quote-selection-mode-v1", "theme");
+  localStorage.removeItem("dashboard-quote-poet-collection-v1");
   localStorage.setItem("dashboard-quote-date", new Date().toDateString());
   localStorage.setItem("dashboard-quote-index", "2");
 

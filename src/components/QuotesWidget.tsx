@@ -1,45 +1,71 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { quoteCategories, Quote, QuoteCategory } from "../data/quotes";
+import { getPoetPortraitForAuthor, getPoetPortraitForCategory } from "../data/poetPortraits";
 import { fetchNews, formatTimeAgo, NewsItem } from "../services/news";
 import { loadQuotesDefaultMode, saveQuotesDefaultMode } from "../settings/quotesMode";
 
 const CATEGORY_KEY = "dashboard-quote-category";
+const QUOTE_SELECTION_MODE_KEY = "dashboard-quote-selection-mode-v1";
+const QUOTE_POET_COLLECTION_KEY = "dashboard-quote-poet-collection-v1";
+const QUOTE_CONTEXT_KEY = "dashboard-quote-context-v1";
 const QUOTE_INDEX_KEY = "dashboard-quote-index";
 const LAST_QUOTE_DATE_KEY = "dashboard-quote-date";
 
 type Mode = "quotes" | "news";
+type QuoteSelection =
+  | { mode: "single"; categoryId: string }
+  | { mode: "poet-collection"; categoryIds: string[] };
 
 function getTodayStr() {
   return new Date().toDateString();
 }
 
-function loadSavedCategory(): string {
-  return localStorage.getItem(CATEGORY_KEY) || "inspirational";
+function loadSavedSelection(): QuoteSelection {
+  const selectionMode = localStorage.getItem(QUOTE_SELECTION_MODE_KEY);
+  if (selectionMode === "poet-collection") {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(QUOTE_POET_COLLECTION_KEY) || "[]");
+      if (Array.isArray(parsed)) {
+        const validIds = [...new Set(parsed.filter((item): item is string => typeof item === "string" && item.length > 0))];
+        const validPoetCategories = quoteCategories.filter((category) => !!getPoetPortraitForCategory(category.id)).map((category) => category.id);
+        const categoryIds = validIds.filter((id) => validPoetCategories.includes(id));
+        if (categoryIds.length > 0) return { mode: "poet-collection", categoryIds };
+      }
+    } catch {
+      // Fall back to single selection.
+    }
+  }
+  return { mode: "single", categoryId: localStorage.getItem(CATEGORY_KEY) || "inspirational" };
 }
 
-function getDailyQuote(category: QuoteCategory): { quote: Quote; index: number } {
+function getDailyQuote(categories: QuoteCategory[], contextKey: string): { quote: Quote; index: number } {
+  const pool = categories.flatMap((category) => category.quotes);
+  if (pool.length === 0) {
+    return { quote: quoteCategories[0]!.quotes[0]!, index: 0 };
+  }
   const today = getTodayStr();
   const savedDate = localStorage.getItem(LAST_QUOTE_DATE_KEY);
   const savedIndex = parseInt(localStorage.getItem(QUOTE_INDEX_KEY) || "0", 10);
-  const savedCat = localStorage.getItem(CATEGORY_KEY);
+  const savedContext = localStorage.getItem(QUOTE_CONTEXT_KEY);
 
-  if (savedDate === today && savedCat === category.id && savedIndex < category.quotes.length) {
-    return { quote: category.quotes[savedIndex], index: savedIndex };
+  if (savedDate === today && savedContext === contextKey && savedIndex < pool.length) {
+    return { quote: pool[savedIndex], index: savedIndex };
   }
 
   const seed = today.split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-  const index = seed % category.quotes.length;
+  const index = seed % pool.length;
 
   localStorage.setItem(LAST_QUOTE_DATE_KEY, today);
+  localStorage.setItem(QUOTE_CONTEXT_KEY, contextKey);
   localStorage.setItem(QUOTE_INDEX_KEY, String(index));
 
-  return { quote: category.quotes[index], index };
+  return { quote: pool[index], index };
 }
 
 export default function QuotesWidget() {
   const [mode, setMode] = useState<Mode>(() => loadQuotesDefaultMode());
-  const [categoryId, setCategoryId] = useState(loadSavedCategory);
+  const [quoteSelection, setQuoteSelection] = useState<QuoteSelection>(loadSavedSelection);
   const [showPicker, setShowPicker] = useState(false);
   const [currentQuote, setCurrentQuote] = useState<Quote | null>(null);
   const [dropdownRect, setDropdownRect] = useState<DOMRect | null>(null);
@@ -49,12 +75,27 @@ export default function QuotesWidget() {
   const [newsError, setNewsError] = useState("");
   const [fade, setFade] = useState(true);
 
-  const category = quoteCategories.find((c) => c.id === categoryId) || quoteCategories[0];
+  const activeCategories = quoteSelection.mode === "poet-collection"
+    ? quoteSelection.categoryIds
+        .map((id) => quoteCategories.find((category) => category.id === id))
+        .filter((category): category is QuoteCategory => Boolean(category))
+    : [quoteCategories.find((category) => category.id === quoteSelection.categoryId) || quoteCategories[0]];
+
+  const activeQuotes = activeCategories.flatMap((category) => category.quotes);
+  const categoryLabel =
+    quoteSelection.mode === "poet-collection"
+      ? `Poet Collection (${activeCategories.length})`
+      : `${activeCategories[0]?.icon ?? "✨"} ${activeCategories[0]?.name ?? "Quotes"}`;
+  const contextKey =
+    quoteSelection.mode === "poet-collection"
+      ? `collection:${quoteSelection.categoryIds.join("|")}`
+      : `single:${quoteSelection.categoryId}`;
+  const poetPortrait = mode === "quotes" && currentQuote ? getPoetPortraitForAuthor(currentQuote.author) : null;
 
   useEffect(() => {
-    const { quote } = getDailyQuote(category);
+    const { quote } = getDailyQuote(activeCategories, contextKey);
     setCurrentQuote(quote);
-  }, [category]);
+  }, [contextKey]);
 
   const loadNews = useCallback(async () => {
     setNewsLoading(true);
@@ -91,9 +132,12 @@ export default function QuotesWidget() {
 
   const handleCategoryChange = (id: string) => {
     setFade(false);
+    const nextSelection: QuoteSelection = { mode: "single", categoryId: id };
     localStorage.setItem(CATEGORY_KEY, id);
+    localStorage.setItem(QUOTE_SELECTION_MODE_KEY, "theme");
+    localStorage.removeItem(QUOTE_POET_COLLECTION_KEY);
     localStorage.removeItem(LAST_QUOTE_DATE_KEY);
-    setCategoryId(id);
+    setQuoteSelection(nextSelection);
     setShowPicker(false);
     setDropdownRect(null);
 
@@ -101,19 +145,30 @@ export default function QuotesWidget() {
   };
 
   const shuffleQuote = () => {
+    if (activeQuotes.length === 0) return;
     setFade(false);
     setTimeout(() => {
-      const randomIdx = Math.floor(Math.random() * category.quotes.length);
-      setCurrentQuote(category.quotes[randomIdx]);
+      const randomIdx = Math.floor(Math.random() * activeQuotes.length);
+      setCurrentQuote(activeQuotes[randomIdx] ?? null);
       localStorage.setItem(QUOTE_INDEX_KEY, String(randomIdx));
+      localStorage.setItem(QUOTE_CONTEXT_KEY, contextKey);
       setFade(true);
     }, 200);
   };
 
   return (
-    <div className="widget-card flex flex-col relative">
+    <div className="widget-card flex flex-col relative overflow-hidden">
+      {poetPortrait ? (
+        <>
+          <div className="quote-widget-poet-bg" aria-hidden="true">
+            <img src={poetPortrait} alt="" className="quote-widget-poet-bg-image" loading="lazy" />
+          </div>
+          <div className="quote-widget-poet-overlay" aria-hidden="true" />
+        </>
+      ) : null}
+
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="relative z-[1] flex items-center justify-between mb-4">
         <div className="flex items-center gap-2.5">
           {mode === "quotes" ? (
             <svg className="w-[18px] h-[18px] text-gray-500/60 dark:text-white/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -202,10 +257,10 @@ export default function QuotesWidget() {
 
       {/* Quote content */}
       {mode === "quotes" && currentQuote && (
-        <div className={`flex-1 min-h-0 overflow-y-auto pr-1 flex flex-col justify-center transition-opacity duration-300 ${fade ? "opacity-100" : "opacity-0"}`}>
+        <div className={`relative z-[1] flex-1 min-h-0 overflow-y-auto pr-1 flex flex-col justify-center transition-opacity duration-300 ${fade ? "opacity-100" : "opacity-0"}`}>
           <div className="mb-1">
             <span className="text-xs px-2 py-0.5 rounded-full bg-black/[0.03] dark:bg-white/[0.04] text-gray-500/60 dark:text-white/25 font-light">
-              {category.icon} {category.name}
+              {categoryLabel}
             </span>
           </div>
 
@@ -230,7 +285,7 @@ export default function QuotesWidget() {
 
       {/* News content */}
       {mode === "news" && (
-        <div className="flex-1 flex flex-col">
+        <div className="relative z-[1] flex-1 flex flex-col">
           {newsLoading && (
             <div className="flex-1 flex items-center justify-center">
               <div className="w-4 h-4 rounded-full border-[1.5px] border-gray-300/30 border-t-gray-500/40 animate-spin" />
@@ -317,7 +372,7 @@ export default function QuotesWidget() {
                         key={cat.id}
                         onClick={() => handleCategoryChange(cat.id)}
                         className={`flex items-center gap-2 px-3 py-2.5 rounded-xl text-left transition-all duration-200
-                          ${cat.id === categoryId
+                          ${quoteSelection.mode === "single" && cat.id === quoteSelection.categoryId
                             ? "bg-blue-500/10 dark:bg-blue-400/10 text-blue-600 dark:text-blue-400"
                             : "hover:bg-black/[0.03] dark:hover:bg-white/[0.04] text-gray-600/80 dark:text-white/50"
                           }`}

@@ -24,6 +24,21 @@ export type OnboardingThemeChoice =
 export type OnboardingLayoutDensity = "comfortable" | "balanced" | "dense";
 export type OnboardingCalendarProvider = "google" | "outlook" | "other";
 export type OnboardingContentMode = "quotes" | "news";
+export type OnboardingQuoteSelectionMode = "theme" | "poet-collection";
+export type OnboardingPresetProfileId =
+  | "starter"
+  | "quick-glance"
+  | "daily-planner"
+  | "weather-brief"
+  | "bookmark-flow"
+  | "deep-work"
+  | "signal-hub"
+  | "research-desk"
+  | "ops-center"
+  | "everything"
+  | "spotlight-a"
+  | "spotlight-b"
+  | "spotlight-c";
 export type OnboardingWidgetId =
   | "greeting"
   | "search"
@@ -49,6 +64,7 @@ export interface OnboardingBookmarksChoice {
 export interface OnboardingAnswers {
   path: OnboardingPath | null;
   presetLayout: "balanced" | "focus" | "dense";
+  presetProfileId: OnboardingPresetProfileId;
   customDensity: OnboardingLayoutDensity;
   themeChoice: OnboardingThemeChoice;
   selectedWidgets: OnboardingWidgetId[];
@@ -59,7 +75,9 @@ export interface OnboardingAnswers {
   calendarProvider: OnboardingCalendarProvider;
   calendarUrl: string;
   contentMode: OnboardingContentMode;
+  quoteSelectionMode: OnboardingQuoteSelectionMode;
   quoteCategoryId: string;
+  quotePoetCategoryIds: string[];
   newsSourceId: string;
   newsCustomRssUrl: string;
 }
@@ -92,6 +110,7 @@ const DEFAULT_STATE: OnboardingState = {
 const DEFAULT_ANSWERS: OnboardingAnswers = {
   path: null,
   presetLayout: "balanced",
+  presetProfileId: "starter",
   customDensity: "balanced",
   themeChoice: "light",
   selectedWidgets: ["greeting", "search", "bookmarks", "weather", "quotes", "tasks", "calendar"],
@@ -107,7 +126,9 @@ const DEFAULT_ANSWERS: OnboardingAnswers = {
   calendarProvider: "google",
   calendarUrl: "",
   contentMode: "quotes",
+  quoteSelectionMode: "theme",
   quoteCategoryId: "inspirational",
+  quotePoetCategoryIds: [],
   newsSourceId: "google-top",
   newsCustomRssUrl: "",
 };
@@ -152,6 +173,21 @@ function sanitizeAnswers(value: unknown): OnboardingAnswers {
   const path = value.path === "preset" || value.path === "custom" ? value.path : null;
   const presetLayout =
     value.presetLayout === "focus" || value.presetLayout === "dense" ? value.presetLayout : "balanced";
+  const presetProfileId =
+    value.presetProfileId === "spotlight-a" ||
+    value.presetProfileId === "spotlight-b" ||
+    value.presetProfileId === "spotlight-c" ||
+    value.presetProfileId === "quick-glance" ||
+    value.presetProfileId === "daily-planner" ||
+    value.presetProfileId === "weather-brief" ||
+    value.presetProfileId === "bookmark-flow" ||
+    value.presetProfileId === "deep-work" ||
+    value.presetProfileId === "signal-hub" ||
+    value.presetProfileId === "research-desk" ||
+    value.presetProfileId === "ops-center" ||
+    value.presetProfileId === "everything"
+      ? value.presetProfileId
+      : "starter";
   const customDensity =
     value.customDensity === "comfortable" || value.customDensity === "dense" ? value.customDensity : "balanced";
   const themeChoice =
@@ -181,12 +217,17 @@ function sanitizeAnswers(value: unknown): OnboardingAnswers {
     value.calendarProvider === "outlook" || value.calendarProvider === "other" ? value.calendarProvider : "google";
   const calendarUrl = typeof value.calendarUrl === "string" ? value.calendarUrl : "";
   const contentMode = value.contentMode === "news" ? "news" : "quotes";
+  const quoteSelectionMode = value.quoteSelectionMode === "poet-collection" ? "poet-collection" : "theme";
   const quoteCategoryId = typeof value.quoteCategoryId === "string" && value.quoteCategoryId ? value.quoteCategoryId : "inspirational";
+  const quotePoetCategoryIds = Array.isArray(value.quotePoetCategoryIds)
+    ? [...new Set(value.quotePoetCategoryIds.filter((item): item is string => typeof item === "string" && item.length > 0))]
+    : [];
   const newsSourceId = typeof value.newsSourceId === "string" && value.newsSourceId ? value.newsSourceId : "google-top";
   const newsCustomRssUrl = typeof value.newsCustomRssUrl === "string" ? value.newsCustomRssUrl : "";
   return {
     path,
     presetLayout,
+    presetProfileId,
     customDensity,
     themeChoice,
     selectedWidgets: selectedWidgets.length > 0 ? selectedWidgets : [...DEFAULT_ANSWERS.selectedWidgets],
@@ -197,7 +238,9 @@ function sanitizeAnswers(value: unknown): OnboardingAnswers {
     calendarProvider,
     calendarUrl,
     contentMode,
+    quoteSelectionMode,
     quoteCategoryId,
+    quotePoetCategoryIds,
     newsSourceId,
     newsCustomRssUrl,
   };
@@ -225,7 +268,9 @@ export function createDefaultOnboardingAnswers(): OnboardingAnswers {
     wallpaperUrl: DEFAULT_ANSWERS.wallpaperUrl,
     bookmarks: { ...DEFAULT_ANSWERS.bookmarks },
     weather: { ...DEFAULT_ANSWERS.weather },
+    quoteSelectionMode: DEFAULT_ANSWERS.quoteSelectionMode,
     quoteCategoryId: DEFAULT_ANSWERS.quoteCategoryId,
+    quotePoetCategoryIds: [...DEFAULT_ANSWERS.quotePoetCategoryIds],
     newsSourceId: DEFAULT_ANSWERS.newsSourceId,
     newsCustomRssUrl: DEFAULT_ANSWERS.newsCustomRssUrl,
   };

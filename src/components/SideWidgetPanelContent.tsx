@@ -434,6 +434,8 @@ type CalendarView = "month" | "week" | "day";
 type CalendarFilter = "today" | "thisWeek" | "google" | "local" | "30min" | "1hr";
 
 const QUOTE_CATEGORY_KEY = "dashboard-quote-category";
+const QUOTE_SELECTION_MODE_KEY = "dashboard-quote-selection-mode-v1";
+const QUOTE_POET_COLLECTION_KEY = "dashboard-quote-poet-collection-v1";
 const QUOTE_FAVORITES_KEY = "dashboard-quote-favorites-v2";
 const QUOTE_FAVORITES_LEGACY_KEY = "dashboard-quote-favorites";
 const SAVED_NEWS_KEY = "dashboard-saved-news";
@@ -689,6 +691,8 @@ function SideQuotesPanel() {
                   onClick={() => {
                     setCategoryId(cat.id);
                     localStorage.setItem(QUOTE_CATEGORY_KEY, cat.id);
+                    localStorage.setItem(QUOTE_SELECTION_MODE_KEY, "theme");
+                    localStorage.removeItem(QUOTE_POET_COLLECTION_KEY);
                   }}
                   className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-left text-[11px] transition-colors ${cat.id === categoryId ? "bg-blue-500/10 text-blue-700 dark:text-blue-200" : "hover:bg-black/[0.03] dark:hover:bg-white/[0.04] text-gray-600 dark:text-white/60"}`}
                 >

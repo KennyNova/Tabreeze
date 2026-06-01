@@ -9,6 +9,7 @@ interface OnboardingGlobeProps {
   phiRef: React.MutableRefObject<number>;
   thetaRef: React.MutableRefObject<number>;
   scaleRef: React.MutableRefObject<number>;
+  markers?: Array<{ location: [number, number]; size: number }>;
 }
 
 export default function OnboardingGlobe({
@@ -19,12 +20,15 @@ export default function OnboardingGlobe({
   phiRef,
   thetaRef,
   scaleRef,
+  markers,
 }: OnboardingGlobeProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const pointerIdRef = useRef<number | null>(null);
   const lastPointerRef = useRef({ x: 0, y: 0 });
   const onCoordinatesChangeRef = useRef(onCoordinatesChange);
   onCoordinatesChangeRef.current = onCoordinatesChange;
+  const markersRef = useRef(markers ?? []);
+  markersRef.current = markers ?? [];
 
   useEffect(() => {
     const container = containerRef.current;
@@ -58,6 +62,7 @@ export default function OnboardingGlobe({
       markerColor: [0.93, 0.46, 0.3],
       glowColor: [0.74, 0.95, 1.0],
       scale: scaleRef.current,
+      markers: markers ?? [],
     });
 
     let frameId = 0;
@@ -70,6 +75,7 @@ export default function OnboardingGlobe({
           scale: scaleRef.current,
           width: Math.max(1, canvas.offsetWidth * 2),
           height: Math.max(1, canvas.offsetHeight * 2),
+          markers: markersRef.current,
         });
       } catch {
         disposed = true;

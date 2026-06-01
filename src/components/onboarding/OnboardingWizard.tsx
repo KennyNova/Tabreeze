@@ -13,11 +13,16 @@ import { loadQuotesDefaultMode, saveQuotesDefaultMode } from "../../settings/quo
 import { getAvailableSearchSources, loadCustomSearchSources } from "../../search/sources";
 import { NEWS_CUSTOM_RSS_KEY, NEWS_CUSTOM_SOURCE_ID, NEWS_SOURCE_KEY, NEWS_SOURCES } from "../../services/news";
 import { quoteCategories } from "../../data/quotes";
+import { getPoetCategoryIdForAuthor, getPoetPortraitForCategory } from "../../data/poetPortraits";
+import { getContentModeArt, getNewsSourceArt } from "../../data/newsWizardArt";
+import { getQuoteThemeArt } from "../../data/quoteThemeWizardArt";
 import {
   buildFolderTree,
+  collectBookmarksForScope,
   loadBookmarkSyncScope,
   pruneOrphanExclusions,
   saveBookmarkSyncScope,
+  type BookmarkLeaf,
   type BookmarkTreeFolderNode,
 } from "../../settings/bookmarksSync";
 import {
@@ -33,10 +38,94 @@ import {
   type OnboardingWidgetId,
 } from "../../settings/onboarding";
 import type { ThemeState } from "../../settings/themeStore";
-import type { ThemeSettingsSelectablePreset, ThemeTokens } from "../../settings/themeTokens";
+import { THEME_TOKEN_ORDER, type ThemeSettingsSelectablePreset, type ThemeTokens } from "../../settings/themeTokens";
 import OnboardingGlobe from "./OnboardingGlobe";
 import OnboardingWizardChrome from "./OnboardingWizardChrome";
 import OnboardingWizardProgressBar from "./OnboardingWizardProgressBar";
+
+function ReviewThemeSwatchFan({ tokens }: { tokens: ThemeTokens }) {
+  const tileRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const angleRef = useRef<number[]>([]);
+  const velocityRef = useRef<number[]>([]);
+  const targetVelocityRef = useRef<number[]>([]);
+  const prevXRef = useRef<number | null>(null);
+  const rafRef = useRef(0);
+  const tokenCount = THEME_TOKEN_ORDER.length;
+
+  if (angleRef.current.length !== tokenCount) {
+    angleRef.current = Array.from({ length: tokenCount }, () => 0);
+    velocityRef.current = Array.from({ length: tokenCount }, () => 0);
+    targetVelocityRef.current = Array.from({ length: tokenCount }, () => 0);
+  }
+
+  useEffect(() => {
+    const tick = () => {
+      for (let i = 0; i < tokenCount; i += 1) {
+        velocityRef.current[i] += (targetVelocityRef.current[i] - velocityRef.current[i]) * 0.18;
+        targetVelocityRef.current[i] *= 0.92;
+        velocityRef.current[i] *= 0.96;
+        angleRef.current[i] += velocityRef.current[i];
+        const tile = tileRefs.current[i];
+        if (tile) {
+          tile.style.transform = `rotate(${angleRef.current[i]}deg)`;
+        }
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [tokenCount]);
+
+  return (
+    <div
+      className="grid grid-cols-3 gap-1 shrink-0"
+      style={{ width: 66, height: 44, cursor: "grab" }}
+      onMouseLeave={() => {
+        prevXRef.current = null;
+        for (let i = 0; i < tokenCount; i += 1) targetVelocityRef.current[i] = 0;
+      }}
+      onMouseMove={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        const pointerX = event.clientX - rect.left;
+        const pointerY = event.clientY - rect.top;
+        const prevX = prevXRef.current;
+        const dragX = prevX === null ? 0 : pointerX - prevX;
+        prevXRef.current = pointerX;
+        const spinDirection = dragX === 0 ? 0 : dragX > 0 ? 1 : -1;
+        const spinPower = Math.min(10, Math.abs(dragX) * 1.2);
+
+        for (let idx = 0; idx < tokenCount; idx += 1) {
+          const col = idx % 3;
+          const row = Math.floor(idx / 3);
+          const cx = ((col + 0.5) / 3) * rect.width;
+          const cy = ((row + 0.5) / 3) * rect.height;
+          const dx = pointerX - cx;
+          const dy = pointerY - cy;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const influence = Math.max(0, 1 - dist / 34);
+          if (influence <= 0) continue;
+          targetVelocityRef.current[idx] += spinDirection * spinPower * influence;
+        }
+      }}
+    >
+      {THEME_TOKEN_ORDER.map((tokenKey, idx) => (
+        <span
+          key={tokenKey}
+          ref={(node) => {
+            tileRefs.current[idx] = node;
+          }}
+          className="rounded-sm"
+          style={{
+            background: tokens[tokenKey],
+            transformOrigin: "50% 50%",
+            willChange: "transform",
+          }}
+          title={tokenKey}
+        />
+      ))}
+    </div>
+  );
+}
 
 interface OnboardingWizardProps {
   open: boolean;
@@ -75,7 +164,20 @@ const WIZARD_WALLPAPER_PRESETS = [
   { name: "City", url: "https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=1920&q=80" },
 ];
 
+const QUOTE_CATEGORY_KEY = "dashboard-quote-category";
+const QUOTE_SELECTION_MODE_KEY = "dashboard-quote-selection-mode-v1";
+const QUOTE_POET_COLLECTION_KEY = "dashboard-quote-poet-collection-v1";
+
 function QuoteCategoryIcon({ categoryId }: { categoryId: string }) {
+  const poetPortrait = getPoetPortraitForCategory(categoryId);
+  if (poetPortrait) {
+    return (
+      <span className="w-6 h-6 rounded-md overflow-hidden shrink-0 border border-black/10 dark:border-white/10">
+        <img src={poetPortrait} alt="" className="w-full h-full object-cover" loading="lazy" />
+      </span>
+    );
+  }
+
   const palette = ["#6d8bff", "#8f6dff", "#36b6a2", "#d68b2d", "#d25f8b", "#5f8ad2"];
   const sum = categoryId.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
   const color = palette[sum % palette.length];
@@ -829,7 +931,25 @@ export default function OnboardingWizard({
   const globePhiRef = useRef(0);
   const globeThetaRef = useRef(0);
   const globeScaleRef = useRef(1.08);
+  const reviewGlobePhiRef = useRef(0);
+  const reviewGlobeThetaRef = useRef(0);
+  const reviewGlobeScaleRef = useRef(1.18);
   const globeAnimationFrameRef = useRef<number | null>(null);
+  const [reviewBookmarks, setReviewBookmarks] = useState<BookmarkLeaf[]>([]);
+
+  useEffect(() => {
+    if (stepId !== "review") return;
+    if (typeof chrome === "undefined" || !chrome.bookmarks) return;
+    chrome.bookmarks.getTree((tree) => {
+      const scope = {
+        includedFolderIds: answers.bookmarks.includedFolderIds,
+        excludedBookmarkIds: answers.bookmarks.excludedBookmarkIds,
+      };
+      const { folders, looseBookmarks } = collectBookmarksForScope(tree, scope);
+      const all = [...looseBookmarks, ...folders.flatMap((f) => f.bookmarks)];
+      setReviewBookmarks(all.slice(0, 48));
+    });
+  }, [stepId]);
   const longitudeToPhi = (lon: number): number => -((lon + 90) * Math.PI) / 180;
   const latitudeToTheta = (lat: number): number => (lat * Math.PI) / 180;
 
@@ -960,7 +1080,18 @@ export default function OnboardingWizard({
     const weather = getWeatherSettings();
     const bookmarks = loadBookmarkSyncScope();
     const wallpaper = localStorage.getItem("dashboard-wallpaper") ?? "";
-    const quoteCategory = localStorage.getItem("dashboard-quote-category") ?? "inspirational";
+    const quoteCategory = localStorage.getItem(QUOTE_CATEGORY_KEY) ?? "inspirational";
+    const quoteSelectionModeRaw = localStorage.getItem(QUOTE_SELECTION_MODE_KEY);
+    const quoteSelectionMode = quoteSelectionModeRaw === "poet-collection" ? "poet-collection" : "theme";
+    let quotePoetCategoryIds: string[] = [];
+    try {
+      const parsed = JSON.parse(localStorage.getItem(QUOTE_POET_COLLECTION_KEY) ?? "[]");
+      if (Array.isArray(parsed)) {
+        quotePoetCategoryIds = [...new Set(parsed.filter((item): item is string => typeof item === "string" && item.length > 0))];
+      }
+    } catch {
+      quotePoetCategoryIds = [];
+    }
     const newsSource = localStorage.getItem(NEWS_SOURCE_KEY) ?? NEWS_SOURCES[0]?.id ?? "google-top";
     const newsCustomRssUrl = localStorage.getItem(NEWS_CUSTOM_RSS_KEY) ?? "";
     const baseAnswers = {
@@ -975,7 +1106,9 @@ export default function OnboardingWizard({
       },
       calendarUrl: getStoredIcalUrl(),
       contentMode: loadQuotesDefaultMode(),
+      quoteSelectionMode,
       quoteCategoryId: quoteCategory,
+      quotePoetCategoryIds,
       newsSourceId: newsSource,
       newsCustomRssUrl,
       bookmarks: bookmarks ?? createDefaultOnboardingAnswers().bookmarks,
@@ -1106,7 +1239,12 @@ export default function OnboardingWizard({
 
   const persistSelections = (nextStep: OnboardingStepId): boolean => {
     try {
-      const answersForPersist = normalizePresetSelection(answers);
+      const normalizedAnswers = normalizePresetSelection(answers);
+      const answersForPersist: OnboardingAnswers =
+        normalizedAnswers.quoteSelectionMode === "poet-collection" &&
+        normalizedAnswers.quotePoetCategoryIds.length === 0
+          ? { ...normalizedAnswers, quoteSelectionMode: "theme" }
+          : normalizedAnswers;
       if (
         answersForPersist.presetProfileId !== answers.presetProfileId ||
         answersForPersist.presetLayout !== answers.presetLayout
@@ -1152,7 +1290,14 @@ export default function OnboardingWizard({
         storeIcalUrl(answersForPersist.calendarUrl.trim());
       }
 
-      localStorage.setItem("dashboard-quote-category", answersForPersist.quoteCategoryId);
+      localStorage.setItem(QUOTE_CATEGORY_KEY, answersForPersist.quoteCategoryId);
+      if (answersForPersist.quoteSelectionMode === "poet-collection" && answersForPersist.quotePoetCategoryIds.length > 0) {
+        localStorage.setItem(QUOTE_SELECTION_MODE_KEY, "poet-collection");
+        localStorage.setItem(QUOTE_POET_COLLECTION_KEY, JSON.stringify(answersForPersist.quotePoetCategoryIds));
+      } else {
+        localStorage.setItem(QUOTE_SELECTION_MODE_KEY, "theme");
+        localStorage.removeItem(QUOTE_POET_COLLECTION_KEY);
+      }
       localStorage.setItem(NEWS_SOURCE_KEY, answersForPersist.newsSourceId);
       localStorage.setItem(NEWS_CUSTOM_RSS_KEY, answersForPersist.newsCustomRssUrl.trim());
       onWallpaperChange(answersForPersist.wallpaperUrl);
@@ -1201,6 +1346,9 @@ export default function OnboardingWizard({
     if (stepId === "presetLayout") return availablePresetProfiles.length > 0 && !activePresetHasOverlap;
     if (stepId === "contentMode" && answers.contentMode === "news" && answers.newsSourceId === NEWS_CUSTOM_SOURCE_ID) {
       return Boolean(answers.newsCustomRssUrl.trim());
+    }
+    if (stepId === "contentMode" && answers.contentMode === "quotes" && answers.quoteSelectionMode === "poet-collection") {
+      return answers.quotePoetCategoryIds.length > 0;
     }
     return true;
   })();
@@ -1641,7 +1789,7 @@ export default function OnboardingWizard({
       ];
       const selected = new Set(answers.selectedWidgets);
       return (
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           <div className="text-xs theme-text-secondary">Pick what should appear on your dashboard.</div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {widgetMeta.map((widget) => (
@@ -2485,6 +2633,31 @@ export default function OnboardingWizard({
     }
 
     if (stepId === "contentMode") {
+      const poetCategories = quoteCategories.filter((category) => getPoetPortraitForCategory(category.id));
+      const themeCategories = quoteCategories.filter((category) => !getPoetPortraitForCategory(category.id));
+      const selectedThemeCategory =
+        answers.quoteSelectionMode === "theme"
+          ? themeCategories.find((category) => category.id === answers.quoteCategoryId) ?? null
+          : null;
+      const featuredPoetIds = new Set<string>(
+        selectedThemeCategory
+          ? selectedThemeCategory.quotes
+              .map((quote) => getPoetCategoryIdForAuthor(quote.author))
+              .filter((poetId): poetId is string => Boolean(poetId))
+          : []
+      );
+      const newsSourceDescriptions: Record<string, string> = {
+        "google-top": "Top breaking stories across major topics.",
+        "google-tech": "Latest product launches and technology trends.",
+        "google-business": "Markets, finance, and business headlines.",
+        "google-world": "International affairs and global updates.",
+        [NEWS_CUSTOM_SOURCE_ID]: "Use your own RSS feed URL.",
+      };
+      const eggshellSvgTileStyle = {
+        background: "color-mix(in srgb, #F3EBDD 82%, var(--theme-surface) 18%)",
+        borderColor: "color-mix(in srgb, #D8CDBE 55%, var(--theme-border) 45%)",
+      } as const;
+
       return (
         <div className="space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2496,7 +2669,7 @@ export default function OnboardingWizard({
                 key={option.id}
                 type="button"
                 onClick={() => setAnswers((prev) => ({ ...prev, contentMode: option.id as OnboardingContentMode }))}
-                className="rounded-2xl border p-4 text-left"
+                className="rounded-2xl border p-3 text-left min-h-[104px]"
                 style={{
                   borderColor:
                     answers.contentMode === option.id
@@ -2508,15 +2681,24 @@ export default function OnboardingWizard({
                       : "color-mix(in srgb, var(--theme-surface) 70%, transparent)",
                 }}
               >
-                <div className="font-medium text-sm theme-text">{option.title}</div>
-                <div className="text-xs theme-text-secondary mt-1">{option.desc}</div>
+                <div className="h-full flex items-start justify-between gap-2.5">
+                  <div className="min-w-0">
+                    <div className="font-medium text-sm theme-text">{option.title}</div>
+                    <div className="text-xs theme-text-secondary mt-1">{option.desc}</div>
+                  </div>
+                  {getContentModeArt(option.id) ? (
+                    <div className="shrink-0 rounded-xl border p-2" style={eggshellSvgTileStyle}>
+                      <img src={getContentModeArt(option.id) ?? ""} alt="" className="w-16 h-11 object-contain" loading="lazy" />
+                    </div>
+                  ) : null}
+                </div>
               </button>
             ))}
           </div>
           {answers.contentMode === "news" ? (
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <div className="text-xs theme-text-secondary">News source</div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {NEWS_SOURCES.map((source) => {
                   const active = answers.newsSourceId === source.id;
                   return (
@@ -2524,7 +2706,7 @@ export default function OnboardingWizard({
                       key={source.id}
                       type="button"
                       onClick={() => setAnswers((prev) => ({ ...prev, newsSourceId: source.id }))}
-                      className="rounded-xl border p-2 text-left"
+                      className="rounded-xl border p-2.5 text-left flex items-start gap-2.5 min-h-[74px]"
                       style={{
                         borderColor: active
                           ? "color-mix(in srgb, var(--theme-accent) 55%, transparent)"
@@ -2534,12 +2716,20 @@ export default function OnboardingWizard({
                           : "color-mix(in srgb, var(--theme-surface) 70%, transparent)",
                       }}
                     >
-                      <div className="text-xs font-medium theme-text">{source.label}</div>
+                      <span className="w-12 h-12 rounded-lg overflow-hidden border shrink-0 flex items-center justify-center p-1" style={eggshellSvgTileStyle}>
+                        <img src={getNewsSourceArt(source.id)} alt="" className="w-full h-full object-contain" loading="lazy" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-xs font-medium theme-text leading-tight">{source.label}</span>
+                        <span className="block mt-0.5 text-[10px] theme-text-secondary leading-snug line-clamp-2">
+                          {newsSourceDescriptions[source.id] ?? "News source"}
+                        </span>
+                      </span>
                     </button>
                   );
                 })}
               </div>
-              <div className="space-y-1">
+              <div className="space-y-0.5">
                 <input
                   value={answers.newsCustomRssUrl}
                   onChange={(event) => setAnswers((prev) => ({ ...prev, newsCustomRssUrl: event.target.value }))}
@@ -2547,40 +2737,119 @@ export default function OnboardingWizard({
                   className="input-field text-xs"
                   placeholder="https://example.com/feed.xml (custom RSS)"
                 />
-                <p className="text-[11px] theme-text-secondary">
-                  Enter a custom RSS URL and it will be used when "Custom RSS Feed" is selected.
+                <p className="text-[10px] theme-text-secondary">
+                  Used only when "Custom RSS Feed" is selected.
                 </p>
               </div>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <div className="text-xs theme-text-secondary">Quote theme / person</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {quoteCategories.map((category) => {
-                  const active = answers.quoteCategoryId === category.id;
-                  return (
-                    <button
-                      key={category.id}
-                      type="button"
-                      onClick={() => setAnswers((prev) => ({ ...prev, quoteCategoryId: category.id }))}
-                      className="rounded-xl border p-2.5 text-left flex items-center gap-2.5"
-                      style={{
-                        borderColor: active
-                          ? "color-mix(in srgb, var(--theme-accent) 55%, transparent)"
-                          : "color-mix(in srgb, var(--theme-border) 72%, transparent)",
-                        background: active
-                          ? "color-mix(in srgb, var(--theme-accent) 12%, transparent)"
-                          : "color-mix(in srgb, var(--theme-surface) 70%, transparent)",
-                      }}
-                    >
-                      <QuoteCategoryIcon categoryId={category.id} />
-                      <span className="min-w-0">
-                        <span className="block text-xs font-medium theme-text truncate">{category.name}</span>
-                        <span className="block text-[11px] theme-text-secondary truncate">{category.description}</span>
-                      </span>
-                    </button>
-                  );
-                })}
+              <div className="text-[10px] theme-text-secondary">
+                Poets are multi-select. Themes are single-select and switch you back to theme mode.
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-[10px] uppercase tracking-[0.08em] theme-text-secondary">Poets</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {poetCategories.map((category) => {
+                    const active = answers.quotePoetCategoryIds.includes(category.id);
+                    const featuredInSelectedTheme = featuredPoetIds.has(category.id);
+                    const poetPortrait = getPoetPortraitForCategory(category.id);
+                    return (
+                      <button
+                        key={category.id}
+                        type="button"
+                        onClick={() =>
+                          setAnswers((prev) => {
+                            const alreadySelected = prev.quotePoetCategoryIds.includes(category.id);
+                            const nextPoets = alreadySelected
+                              ? prev.quotePoetCategoryIds.filter((id) => id !== category.id)
+                              : [...prev.quotePoetCategoryIds, category.id];
+                            return { ...prev, quoteSelectionMode: "poet-collection", quotePoetCategoryIds: nextPoets };
+                          })
+                        }
+                        className="rounded-xl border p-2.5 text-left flex items-center gap-2"
+                        style={{
+                          borderColor: active
+                            ? "color-mix(in srgb, var(--theme-accent) 55%, transparent)"
+                            : featuredInSelectedTheme
+                            ? "color-mix(in srgb, var(--theme-accent) 35%, transparent)"
+                            : "color-mix(in srgb, var(--theme-border) 72%, transparent)",
+                          background: active
+                            ? "color-mix(in srgb, var(--theme-accent) 12%, transparent)"
+                            : "color-mix(in srgb, var(--theme-surface) 70%, transparent)",
+                          boxShadow: featuredInSelectedTheme
+                            ? "inset 0 0 0 1px color-mix(in srgb, var(--theme-accent) 22%, transparent)"
+                            : "none",
+                          borderStyle: featuredInSelectedTheme && !active ? "dashed" : "solid",
+                        }}
+                      >
+                        <span
+                          className="w-11 h-11 rounded-lg overflow-hidden shrink-0 border border-white/20"
+                          style={{ background: "#F4EEDD" }}
+                        >
+                          {poetPortrait ? (
+                            <img src={poetPortrait} alt="" className="w-full h-full object-cover" loading="lazy" />
+                          ) : (
+                            <QuoteCategoryIcon categoryId={category.id} />
+                          )}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-xs font-medium theme-text truncate">{category.name}</span>
+                          <span className="block text-[10px] theme-text-secondary truncate">
+                            {active ? "Selected" : featuredInSelectedTheme ? "Included in theme" : "Poet"}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-[10px] uppercase tracking-[0.08em] theme-text-secondary">Themes</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {themeCategories.map((category) => {
+                    const active = answers.quoteSelectionMode === "theme" && answers.quoteCategoryId === category.id;
+                    const themeArt = getQuoteThemeArt(category.id);
+                    return (
+                      <button
+                        key={category.id}
+                        type="button"
+                        onClick={() =>
+                          setAnswers((prev) => ({
+                            ...prev,
+                            quoteSelectionMode: "theme",
+                            quoteCategoryId: category.id,
+                            quotePoetCategoryIds: [],
+                          }))
+                        }
+                        className="rounded-xl border p-2.5 text-left flex items-center gap-2"
+                        style={{
+                          borderColor: active
+                            ? "color-mix(in srgb, var(--theme-accent) 55%, transparent)"
+                            : "color-mix(in srgb, var(--theme-border) 72%, transparent)",
+                          background: active
+                            ? "color-mix(in srgb, var(--theme-accent) 12%, transparent)"
+                            : "color-mix(in srgb, var(--theme-surface) 70%, transparent)",
+                        }}
+                      >
+                        <span className="w-11 h-11 rounded-lg overflow-hidden border shrink-0 flex items-center justify-center p-1" style={eggshellSvgTileStyle}>
+                          {themeArt ? (
+                            <img src={themeArt} alt="" className="w-full h-full object-contain" loading="lazy" />
+                          ) : (
+                            <QuoteCategoryIcon categoryId={category.id} />
+                          )}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-xs font-medium theme-text truncate">{category.name}</span>
+                          <span className="block text-[10px] theme-text-secondary truncate">{category.description}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}
@@ -2593,122 +2862,340 @@ export default function OnboardingWizard({
       );
     }
 
+    const contentSummary =
+      answers.contentMode === "news"
+        ? `News • ${
+            answers.newsSourceId === NEWS_CUSTOM_SOURCE_ID
+              ? answers.newsCustomRssUrl.trim() || "Custom RSS not set"
+              : NEWS_SOURCES.find((source) => source.id === answers.newsSourceId)?.label ?? answers.newsSourceId
+          }`
+        : answers.quoteSelectionMode === "poet-collection"
+        ? `Quotes • Poets: ${
+            answers.quotePoetCategoryIds
+              .map((id) => quoteCategories.find((category) => category.id === id)?.name ?? id)
+              .join(", ") || "none"
+          }`
+        : `Quotes • Theme: ${quoteCategories.find((category) => category.id === answers.quoteCategoryId)?.name ?? answers.quoteCategoryId}`;
+    const themeChoiceLabelMap: Record<OnboardingAnswers["themeChoice"], string> = {
+      light: "Light",
+      dark: "Dark",
+      "dev-matrix": "Dev",
+      "coffee-espresso": "Coffee",
+      random: "Random",
+    };
+    const wallpaperPresetName = WIZARD_WALLPAPER_PRESETS.find((preset) => preset.url === answers.wallpaperUrl)?.name ?? "Custom";
+    const selectedQuoteThemeArt = getQuoteThemeArt(answers.quoteCategoryId);
+    const selectedPoetPreviewIds = answers.quotePoetCategoryIds.slice(0, 3);
+    const selectedSearchProviders = answers.searchBars
+      .map((bar) => searchSources.find((source) => source.id === bar.sourceId))
+      .filter((source): source is (typeof searchSources)[number] => Boolean(source));
+    const reviewLayoutPreviewTiles = buildLayoutFromAnswers();
+    const reviewLayoutMaxRow = Math.max(
+      2,
+      reviewLayoutPreviewTiles.reduce((acc, tile) => Math.max(acc, tile.rowStart + tile.rowSpan - 1), 1)
+    );
+    const weatherLat = typeof answers.weather.customLat === "number" ? answers.weather.customLat : 0;
+    const weatherLon = typeof answers.weather.customLon === "number" ? answers.weather.customLon : 0;
+    reviewGlobePhiRef.current = longitudeToPhi(weatherLon) + 0.45;
+    reviewGlobeThetaRef.current = latitudeToTheta(weatherLat) - 0.18;
+    reviewGlobeScaleRef.current = 1.18;
+    const renderEditJump = (targetStep: OnboardingStepId) =>
+      stepRail.includes(targetStep) ? (
+        <button
+          type="button"
+          className="btn-ghost text-[10px] mt-1 px-2 py-0.5"
+          onClick={() => jumpToStep(targetStep)}
+        >
+          Edit
+        </button>
+      ) : null;
+
     return (
-      <div className="space-y-3 text-sm">
-        <div className="rounded-xl border p-3">
-          <div className="font-medium theme-text mb-1">Layout</div>
-          <div className="text-xs theme-text-secondary">
-            {answers.path === "preset"
-              ? `Preset: ${getPresetProfileLabel(answers.presetProfileId)}`
-              : `Custom density: ${answers.customDensity}`}
+      <div className="space-y-2 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          <div className="rounded-lg border p-2.5">
+            <div className="flex items-start justify-between gap-2">
+              <span className="min-w-0">
+                <div className="font-medium theme-text">Layout</div>
+                <div className="theme-text-secondary mt-0.5">
+                  {answers.path === "preset"
+                    ? `Preset: ${getPresetProfileLabel(answers.presetProfileId)}`
+                    : `Custom: ${answers.customDensity}`}
+                </div>
+              </span>
+              <span className="w-28 h-20 rounded-lg p-1 shrink-0 overflow-hidden">
+                <span
+                  className="grid w-full h-full"
+                  style={{
+                    gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
+                    gridTemplateRows: `repeat(${reviewLayoutMaxRow}, minmax(0, 1fr))`,
+                    gap: "1px",
+                  }}
+                >
+                  {reviewLayoutPreviewTiles.map((tile) => (
+                    <span
+                      key={tile.id}
+                      className="rounded-[2px]"
+                      style={{
+                        gridColumn: `${tile.colStart} / span ${tile.colSpan}`,
+                        gridRow: `${tile.rowStart} / span ${Math.max(1, tile.rowSpan)}`,
+                        background: PREVIEW_TILE_COLORS[tile.type].bg,
+                        border: `1px solid ${PREVIEW_TILE_COLORS[tile.type].border}`,
+                      }}
+                    />
+                  ))}
+                </span>
+              </span>
+            </div>
+            {renderEditJump(answers.path === "preset" ? "presetLayout" : "customLayout")}
           </div>
-          {stepRail.includes(answers.path === "preset" ? "presetLayout" : "customLayout") ? (
-            <button
-              type="button"
-              className="btn-ghost text-[11px] mt-2"
-              onClick={() => jumpToStep(answers.path === "preset" ? "presetLayout" : "customLayout")}
-            >
-              Edit step
-            </button>
+          <div className="rounded-lg border p-2.5">
+            <div className="flex items-start justify-between gap-2">
+              <span className="min-w-0">
+                <div className="font-medium theme-text">Theme</div>
+                <div className="theme-text-secondary mt-0.5">{themeChoiceLabelMap[answers.themeChoice]}</div>
+              </span>
+              <ReviewThemeSwatchFan tokens={theme.tokens} />
+            </div>
+            {renderEditJump("theme")}
+          </div>
+          <div className="rounded-lg border p-2.5 relative overflow-hidden">
+            {answers.wallpaperUrl ? (
+              <>
+                <img
+                  src={answers.wallpaperUrl}
+                  alt=""
+                  className="absolute inset-0 w-full h-full object-cover"
+                  style={{ zIndex: 0 }}
+                />
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    background: "linear-gradient(135deg, var(--theme-surface) 38%, color-mix(in srgb, var(--theme-surface) 55%, transparent) 58%, transparent 78%)",
+                    zIndex: 1,
+                  }}
+                />
+              </>
+            ) : null}
+            <div className="relative" style={{ zIndex: 2 }}>
+              <div className="font-medium theme-text">Background</div>
+              <div className="theme-text-secondary mt-0.5">{answers.wallpaperUrl ? wallpaperPresetName : "None"}</div>
+              {renderEditJump("wallpaper")}
+            </div>
+          </div>
+          {answers.selectedWidgets.includes("search") ? (
+            <div className="rounded-lg border p-2.5">
+              <div className="flex items-start justify-between gap-2">
+                <span>
+                  <div className="font-medium theme-text">Search</div>
+                  <div className="theme-text-secondary mt-0.5">
+                    {selectedSearchProviders.map((provider) => provider.label).join(", ") || `${answers.searchBars.length} bar(s)`}
+                  </div>
+                </span>
+                <span className="w-28 h-20 rounded-lg shrink-0 flex flex-wrap items-center justify-center gap-2 px-2 py-2">
+                  {selectedSearchProviders.length > 0 ? (
+                    selectedSearchProviders.map((provider, idx) => (
+                      <span key={`${provider.id}-${idx}`} className="w-6 h-6 text-gray-600/80 dark:text-white/70">
+                        <SearchSourceLogo sourceId={provider.id} className="w-full h-full" />
+                      </span>
+                    ))
+                  ) : (
+                    <span className="w-6 h-6 rounded-full bg-gray-400/40" />
+                  )}
+                </span>
+              </div>
+              {renderEditJump("searchConfig")}
+            </div>
+          ) : null}
+          {answers.selectedWidgets.includes("bookmarks") ? (
+            <div className="rounded-lg border p-2.5">
+              <div className="font-medium theme-text">Bookmarks</div>
+              <div className="theme-text-secondary mt-0.5 text-[10px]">
+                {answers.bookmarks.includedFolderIds.length} folders • {answers.bookmarks.excludedBookmarkIds.length} exclusions
+              </div>
+              {reviewBookmarks.length > 0 ? (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {reviewBookmarks.map((bm) => {
+                    let faviconSrc: string | null = null;
+                    try {
+                      faviconSrc = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(new URL(bm.url).hostname)}&sz=32`;
+                    } catch { /* skip invalid URLs */ }
+                    return faviconSrc ? (
+                      <img
+                        key={bm.id}
+                        src={faviconSrc}
+                        alt={bm.title}
+                        title={bm.title}
+                        className="w-4 h-4 rounded-sm"
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                      />
+                    ) : null;
+                  })}
+                </div>
+              ) : null}
+              {renderEditJump("bookmarks")}
+            </div>
+          ) : null}
+          {answers.selectedWidgets.includes("weather") ? (
+            <div className="rounded-lg border p-2.5 relative overflow-hidden">
+              <div className="relative z-10">
+                <div className="font-medium theme-text">Weather</div>
+                <div className="theme-text-secondary mt-0.5">
+                  {answers.weather.customCity || "Pinned location"} ({formatCoordinate(answers.weather.customLat)},{" "}
+                  {formatCoordinate(answers.weather.customLon)})
+                </div>
+                {renderEditJump("weather")}
+              </div>
+              <div
+                className="absolute pointer-events-none"
+                style={{ right: "-18px", bottom: "-18px", width: "96px", height: "96px", zIndex: 0 }}
+              >
+                <OnboardingGlobe
+                  key={`review-globe-${weatherLat}-${weatherLon}`}
+                  onCoordinatesChange={() => {}}
+                  initialPhi={reviewGlobePhiRef.current}
+                  initialTheta={reviewGlobeThetaRef.current}
+                  initialScale={1.18}
+                  phiRef={reviewGlobePhiRef}
+                  thetaRef={reviewGlobeThetaRef}
+                  scaleRef={reviewGlobeScaleRef}
+                  markers={[{ location: [weatherLat, weatherLon], size: 0.07 }]}
+                />
+              </div>
+            </div>
+          ) : null}
+          {answers.selectedWidgets.includes("calendar") ? (
+            <div className="rounded-lg border p-2.5">
+              <div className="flex items-start justify-between gap-2">
+                <span>
+                  <div className="font-medium theme-text">Calendar</div>
+                  <div className="theme-text-secondary mt-0.5">{answers.calendarUrl ? `${answers.calendarProvider === "google" ? "Google" : answers.calendarProvider === "outlook" ? "Outlook" : "iCal"} connected` : "Skipped"}</div>
+                </span>
+                {answers.calendarUrl ? (
+                  <span className="w-9 h-9 rounded-lg overflow-hidden shrink-0 flex items-center justify-center">
+                    {answers.calendarProvider === "google" ? (
+                      <img
+                        src="https://www.google.com/s2/favicons?domain=calendar.google.com&sz=64"
+                        alt="Google Calendar"
+                        className="w-full h-full object-contain"
+                      />
+                    ) : answers.calendarProvider === "outlook" ? (
+                      <img
+                        src="https://www.google.com/s2/favicons?domain=outlook.live.com&sz=64"
+                        alt="Outlook Calendar"
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <svg viewBox="0 0 24 24" fill="none" className="w-7 h-7 theme-text-secondary">
+                        <rect x="3" y="4" width="18" height="17" rx="2" stroke="currentColor" strokeWidth="1.5" />
+                        <path d="M3 9h18" stroke="currentColor" strokeWidth="1.5" />
+                        <path d="M8 2v4M16 2v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                        <rect x="7" y="13" width="3" height="3" rx="0.5" fill="currentColor" opacity="0.7" />
+                        <rect x="10.5" y="13" width="3" height="3" rx="0.5" fill="currentColor" opacity="0.7" />
+                        <rect x="14" y="13" width="3" height="3" rx="0.5" fill="currentColor" opacity="0.4" />
+                      </svg>
+                    )}
+                  </span>
+                ) : null}
+              </div>
+              {renderEditJump("calendar")}
+            </div>
+          ) : null}
+          {answers.selectedWidgets.includes("quotes") ? (
+            <div className="rounded-lg border p-2.5 sm:col-span-2 lg:col-span-3">
+              <div className="flex items-start justify-between gap-2">
+                <span className="min-w-0">
+                  <div className="font-medium theme-text">Quotes / News</div>
+                  <div className="theme-text-secondary mt-0.5">{contentSummary}</div>
+                </span>
+                {answers.contentMode === "news" ? (
+                  <span className="w-28 h-20 rounded-lg overflow-hidden shrink-0 p-1">
+                    <img src={getNewsSourceArt(answers.newsSourceId)} alt="" className="w-full h-full object-contain" />
+                  </span>
+                ) : answers.quoteSelectionMode === "theme" ? (
+                  <span className="w-28 h-20 rounded-lg overflow-hidden shrink-0 p-1">
+                    {selectedQuoteThemeArt ? (
+                      <img src={selectedQuoteThemeArt} alt="" className="w-full h-full object-contain" />
+                    ) : (
+                      <span className="w-full h-full block bg-gradient-to-br from-indigo-400/35 to-violet-400/20" />
+                    )}
+                  </span>
+                ) : (
+                  (() => {
+                    const previewPoets = selectedPoetPreviewIds.filter((id) => getPoetPortraitForCategory(id));
+                    const portraitW = 44;
+                    const peekGap = 30;
+                    const containerW = Math.max(80, portraitW + (previewPoets.length - 1) * peekGap + 16);
+                    return (
+                      <span
+                        className="shrink-0 relative"
+                        style={{ width: `${containerW}px`, height: "72px" }}
+                      >
+                        {previewPoets.map((id, idx) => {
+                          const portrait = getPoetPortraitForCategory(id);
+                          return (
+                            <span
+                              key={id}
+                              className="absolute bottom-0 overflow-hidden"
+                              style={{
+                                left: `${8 + idx * peekGap}px`,
+                                width: `${portraitW}px`,
+                                height: "68px",
+                                borderRadius: "9999px 9999px 0 0",
+                                background: "#F4EEDD",
+                                zIndex: idx + 1,
+                                boxShadow: idx > 0 ? "-2px 0 6px rgba(0,0,0,0.18)" : "none",
+                              }}
+                            >
+                              <img
+                                src={portrait!}
+                                alt=""
+                                style={{
+                                  position: "absolute",
+                                  top: "4px",
+                                  left: "50%",
+                                  transform: "translateX(-50%)",
+                                  width: "90%",
+                                  height: "90%",
+                                  objectFit: "cover",
+                                  objectPosition: "top center",
+                                }}
+                              />
+                            </span>
+                          );
+                        })}
+                      </span>
+                    );
+                  })()
+                )}
+              </div>
+              {renderEditJump("contentMode")}
+            </div>
           ) : null}
         </div>
-        <div className="rounded-xl border p-3">
-          <div className="font-medium theme-text mb-1">Widgets</div>
-          <div className="text-xs theme-text-secondary">{answers.selectedWidgets.join(", ") || "None selected"}</div>
-          {stepRail.includes("widgetChoice") ? (
-            <button type="button" className="btn-ghost text-[11px] mt-2" onClick={() => jumpToStep("widgetChoice")}>
-              Edit step
-            </button>
-          ) : null}
+
+        <div className="rounded-lg border p-2.5">
+          <div className="font-medium theme-text mb-1.5">Widgets</div>
+          <div className="flex flex-wrap gap-1">
+            {ALL_WIDGETS.map((widget) => {
+              const enabled = answers.selectedWidgets.includes(widget);
+              return (
+                <span
+                  key={widget}
+                  className="px-2 py-0.5 rounded-md text-[11px] capitalize"
+                  style={
+                    enabled
+                      ? { background: "color-mix(in srgb, var(--theme-accent) 15%, transparent)", color: "var(--theme-accent)", border: "1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)" }
+                      : { background: "transparent", color: "var(--theme-text-secondary)", border: "1px solid color-mix(in srgb, var(--theme-border) 60%, transparent)", opacity: 0.5 }
+                  }
+                >
+                  {widget}
+                </span>
+              );
+            })}
+          </div>
+          {renderEditJump("widgetChoice")}
         </div>
-        <div className="rounded-xl border p-3">
-          <div className="font-medium theme-text mb-1">Theme</div>
-          <div className="text-xs theme-text-secondary">{answers.themeChoice}</div>
-          {stepRail.includes("theme") ? (
-            <button type="button" className="btn-ghost text-[11px] mt-2" onClick={() => jumpToStep("theme")}>
-              Edit step
-            </button>
-          ) : null}
-        </div>
-        <div className="rounded-xl border p-3">
-          <div className="font-medium theme-text mb-1">Background</div>
-          <div className="text-xs theme-text-secondary">{answers.wallpaperUrl ? "Custom/preset image selected" : "None"}</div>
-          {stepRail.includes("wallpaper") ? (
-            <button type="button" className="btn-ghost text-[11px] mt-2" onClick={() => jumpToStep("wallpaper")}>
-              Edit step
-            </button>
-          ) : null}
-        </div>
-        {answers.selectedWidgets.includes("search") ? (
-          <div className="rounded-xl border p-3">
-            <div className="font-medium theme-text mb-1">Search Bars</div>
-            <div className="text-xs theme-text-secondary">
-              {answers.searchBars.length} bar(s): {answers.searchBars.map((item) => item.sourceId).join(", ")}
-            </div>
-            {stepRail.includes("searchConfig") ? (
-              <button type="button" className="btn-ghost text-[11px] mt-2" onClick={() => jumpToStep("searchConfig")}>
-                Edit step
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-        {answers.selectedWidgets.includes("bookmarks") ? (
-          <div className="rounded-xl border p-3">
-            <div className="font-medium theme-text mb-1">Bookmarks</div>
-            <div className="text-xs theme-text-secondary">
-              {answers.bookmarks.includedFolderIds.length} folders, {answers.bookmarks.excludedBookmarkIds.length} exclusions
-            </div>
-            {stepRail.includes("bookmarks") ? (
-              <button type="button" className="btn-ghost text-[11px] mt-2" onClick={() => jumpToStep("bookmarks")}>
-                Edit step
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-        {answers.selectedWidgets.includes("weather") ? (
-          <div className="rounded-xl border p-3">
-            <div className="font-medium theme-text mb-1">Weather</div>
-            <div className="text-xs theme-text-secondary">
-              {answers.weather.customCity || "Pinned location"} ({formatCoordinate(answers.weather.customLat)},{" "}
-              {formatCoordinate(answers.weather.customLon)})
-            </div>
-            {stepRail.includes("weather") ? (
-              <button type="button" className="btn-ghost text-[11px] mt-2" onClick={() => jumpToStep("weather")}>
-                Edit step
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-        {answers.selectedWidgets.includes("calendar") ? (
-          <div className="rounded-xl border p-3">
-            <div className="font-medium theme-text mb-1">Calendar</div>
-            <div className="text-xs theme-text-secondary">{answers.calendarUrl ? "Connected URL ready" : "Skipped for now"}</div>
-            {stepRail.includes("calendar") ? (
-              <button type="button" className="btn-ghost text-[11px] mt-2" onClick={() => jumpToStep("calendar")}>
-                Edit step
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-        {answers.selectedWidgets.includes("quotes") ? (
-          <div className="rounded-xl border p-3">
-            <div className="font-medium theme-text mb-1">Quotes / News</div>
-            <div className="text-xs theme-text-secondary">
-              {answers.contentMode === "news"
-                ? `${answers.contentMode} (${
-                    answers.newsSourceId === NEWS_CUSTOM_SOURCE_ID
-                      ? answers.newsCustomRssUrl.trim() || "Custom RSS (not set)"
-                      : NEWS_SOURCES.find((source) => source.id === answers.newsSourceId)?.label ?? answers.newsSourceId
-                  })`
-                : `${answers.contentMode} (${answers.quoteCategoryId})`}
-            </div>
-            {stepRail.includes("contentMode") ? (
-              <button type="button" className="btn-ghost text-[11px] mt-2" onClick={() => jumpToStep("contentMode")}>
-                Edit step
-              </button>
-            ) : null}
-          </div>
-        ) : null}
       </div>
     );
   };
