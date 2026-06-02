@@ -65,9 +65,17 @@ function ReviewThemeSwatchFan({ tokens }: { tokens: ThemeTokens }) {
         targetVelocityRef.current[i] *= 0.92;
         velocityRef.current[i] *= 0.96;
         angleRef.current[i] += velocityRef.current[i];
+        if (Math.abs(targetVelocityRef.current[i]) < 0.05 && Math.abs(velocityRef.current[i]) < 0.22) {
+          const snapAngle = Math.round(angleRef.current[i] / 360) * 360;
+          const delta = snapAngle - angleRef.current[i];
+          angleRef.current[i] += delta * 0.14;
+          if (Math.abs(delta) < 0.35) {
+            angleRef.current[i] = snapAngle;
+          }
+        }
         const tile = tileRefs.current[i];
         if (tile) {
-          tile.style.transform = `rotate(${angleRef.current[i]}deg)`;
+          tile.style.transform = `rotateY(${angleRef.current[i]}deg)`;
         }
       }
       rafRef.current = requestAnimationFrame(tick);
@@ -79,7 +87,7 @@ function ReviewThemeSwatchFan({ tokens }: { tokens: ThemeTokens }) {
   return (
     <div
       className="grid grid-cols-3 gap-1 shrink-0"
-      style={{ width: 66, height: 44, cursor: "grab" }}
+      style={{ width: 112, height: 80, cursor: "default", perspective: "700px" }}
       onMouseLeave={() => {
         prevXRef.current = null;
         for (let i = 0; i < tokenCount; i += 1) targetVelocityRef.current[i] = 0;
@@ -92,7 +100,7 @@ function ReviewThemeSwatchFan({ tokens }: { tokens: ThemeTokens }) {
         const dragX = prevX === null ? 0 : pointerX - prevX;
         prevXRef.current = pointerX;
         const spinDirection = dragX === 0 ? 0 : dragX > 0 ? 1 : -1;
-        const spinPower = Math.min(10, Math.abs(dragX) * 1.2);
+        const spinPower = Math.min(24, Math.abs(dragX) * 2.2);
 
         for (let idx = 0; idx < tokenCount; idx += 1) {
           const col = idx % 3;
@@ -102,7 +110,7 @@ function ReviewThemeSwatchFan({ tokens }: { tokens: ThemeTokens }) {
           const dx = pointerX - cx;
           const dy = pointerY - cy;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          const influence = Math.max(0, 1 - dist / 34);
+          const influence = Math.max(0, 1 - dist / 58);
           if (influence <= 0) continue;
           targetVelocityRef.current[idx] += spinDirection * spinPower * influence;
         }
@@ -118,6 +126,8 @@ function ReviewThemeSwatchFan({ tokens }: { tokens: ThemeTokens }) {
           style={{
             background: tokens[tokenKey],
             transformOrigin: "50% 50%",
+            transformStyle: "preserve-3d",
+            backfaceVisibility: "hidden",
             willChange: "transform",
           }}
           title={tokenKey}
@@ -167,6 +177,9 @@ const WIZARD_WALLPAPER_PRESETS = [
 const QUOTE_CATEGORY_KEY = "dashboard-quote-category";
 const QUOTE_SELECTION_MODE_KEY = "dashboard-quote-selection-mode-v1";
 const QUOTE_POET_COLLECTION_KEY = "dashboard-quote-poet-collection-v1";
+const REVIEW_POET_SIZE = 1.49;
+const REVIEW_POET_GAP = -112;
+const REVIEW_POET_Y = -24;
 
 function QuoteCategoryIcon({ categoryId }: { categoryId: string }) {
   const poetPortrait = getPoetPortraitForCategory(categoryId);
@@ -950,6 +963,7 @@ export default function OnboardingWizard({
       setReviewBookmarks(all.slice(0, 48));
     });
   }, [stepId]);
+
   const longitudeToPhi = (lon: number): number => -((lon + 90) * Math.PI) / 180;
   const latitudeToTheta = (lat: number): number => (lat * Math.PI) / 180;
 
@@ -2885,7 +2899,7 @@ export default function OnboardingWizard({
     };
     const wallpaperPresetName = WIZARD_WALLPAPER_PRESETS.find((preset) => preset.url === answers.wallpaperUrl)?.name ?? "Custom";
     const selectedQuoteThemeArt = getQuoteThemeArt(answers.quoteCategoryId);
-    const selectedPoetPreviewIds = answers.quotePoetCategoryIds.slice(0, 3);
+    const selectedPoetPreviewIds = answers.quotePoetCategoryIds;
     const selectedSearchProviders = answers.searchBars
       .map((bar) => searchSources.find((source) => source.id === bar.sourceId))
       .filter((source): source is (typeof searchSources)[number] => Boolean(source));
@@ -3102,74 +3116,61 @@ export default function OnboardingWizard({
             </div>
           ) : null}
           {answers.selectedWidgets.includes("quotes") ? (
-            <div className="rounded-lg border p-2.5 sm:col-span-2 lg:col-span-3">
-              <div className="flex items-start justify-between gap-2">
-                <span className="min-w-0">
-                  <div className="font-medium theme-text">Quotes / News</div>
-                  <div className="theme-text-secondary mt-0.5">{contentSummary}</div>
-                </span>
+            <div className="rounded-lg border sm:col-span-2 lg:col-span-3 relative overflow-hidden" style={{ minHeight: "80px" }}>
+              {answers.contentMode === "quotes" && answers.quoteSelectionMode === "poet-collection" ? (
+                <>
+                  {/* eggshell solid — fills entire card, visible on the right */}
+                  <div className="absolute inset-0" style={{ background: "#f4eedd", zIndex: 0 }} />
+                  {/* poets: flush to right edge and ordered left-to-right like the label list */}
+                  <div
+                    className="absolute inset-y-0 right-0 flex justify-end items-stretch pointer-events-none"
+                    style={{ zIndex: 1 }}
+                  >
+                    {selectedPoetPreviewIds.filter((id) => getPoetPortraitForCategory(id)).map((id, idx) => (
+                      <img
+                        key={id}
+                        src={getPoetPortraitForCategory(id)!}
+                        alt=""
+                        style={{
+                          height: "100%",
+                          width: "auto",
+                          marginLeft: idx > 0 ? `${REVIEW_POET_GAP}px` : "0",
+                          zIndex: idx + 1,
+                          display: "block",
+                          transform: `translateY(${REVIEW_POET_Y}px) scale(${REVIEW_POET_SIZE})`,
+                          transformOrigin: "50% 0%",
+                        }}
+                      />
+                    ))}
+                  </div>
+                  {/* dark gradient mask: opaque on left, transparent on right — reveals eggshell+poets */}
+                  <div
+                    className="absolute inset-0 pointer-events-none"
+                    style={{
+                      background: "linear-gradient(to right, var(--theme-surface) 32%, color-mix(in srgb, var(--theme-surface) 55%, transparent) 52%, transparent 70%)",
+                      zIndex: 2,
+                    }}
+                  />
+                </>
+              ) : null}
+              <div className="p-2.5 relative" style={{ zIndex: 3 }}>
+                <div className="font-medium theme-text">Quotes / News</div>
+                <div className="theme-text-secondary mt-0.5">{contentSummary}</div>
                 {answers.contentMode === "news" ? (
-                  <span className="w-28 h-20 rounded-lg overflow-hidden shrink-0 p-1">
+                  <span className="mt-1 w-16 h-12 rounded-lg overflow-hidden shrink-0 p-1 block">
                     <img src={getNewsSourceArt(answers.newsSourceId)} alt="" className="w-full h-full object-contain" />
                   </span>
                 ) : answers.quoteSelectionMode === "theme" ? (
-                  <span className="w-28 h-20 rounded-lg overflow-hidden shrink-0 p-1">
+                  <span className="mt-1 w-16 h-12 rounded-lg overflow-hidden shrink-0 p-1 block">
                     {selectedQuoteThemeArt ? (
                       <img src={selectedQuoteThemeArt} alt="" className="w-full h-full object-contain" />
                     ) : (
                       <span className="w-full h-full block bg-gradient-to-br from-indigo-400/35 to-violet-400/20" />
                     )}
                   </span>
-                ) : (
-                  (() => {
-                    const previewPoets = selectedPoetPreviewIds.filter((id) => getPoetPortraitForCategory(id));
-                    const portraitW = 44;
-                    const peekGap = 30;
-                    const containerW = Math.max(80, portraitW + (previewPoets.length - 1) * peekGap + 16);
-                    return (
-                      <span
-                        className="shrink-0 relative"
-                        style={{ width: `${containerW}px`, height: "72px" }}
-                      >
-                        {previewPoets.map((id, idx) => {
-                          const portrait = getPoetPortraitForCategory(id);
-                          return (
-                            <span
-                              key={id}
-                              className="absolute bottom-0 overflow-hidden"
-                              style={{
-                                left: `${8 + idx * peekGap}px`,
-                                width: `${portraitW}px`,
-                                height: "68px",
-                                borderRadius: "9999px 9999px 0 0",
-                                background: "#F4EEDD",
-                                zIndex: idx + 1,
-                                boxShadow: idx > 0 ? "-2px 0 6px rgba(0,0,0,0.18)" : "none",
-                              }}
-                            >
-                              <img
-                                src={portrait!}
-                                alt=""
-                                style={{
-                                  position: "absolute",
-                                  top: "4px",
-                                  left: "50%",
-                                  transform: "translateX(-50%)",
-                                  width: "90%",
-                                  height: "90%",
-                                  objectFit: "cover",
-                                  objectPosition: "top center",
-                                }}
-                              />
-                            </span>
-                          );
-                        })}
-                      </span>
-                    );
-                  })()
-                )}
+                ) : null}
+                {renderEditJump("contentMode")}
               </div>
-              {renderEditJump("contentMode")}
             </div>
           ) : null}
         </div>
