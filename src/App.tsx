@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import ThemeToggle from "./components/ThemeToggle";
 import SettingsModal from "./components/SettingsModal";
+import FeedbackSurveyPopup from "./components/FeedbackSurveyPopup";
+import BugReportModal from "./components/BugReportModal";
 import SideWidgetSlot from "./components/SideWidgetSlot";
 import TileLayout from "./components/TileLayout";
 import { LAYOUT_SIDE_SLOTS_UPDATED_EVENT } from "./layout/constants";
@@ -26,6 +28,14 @@ import {
   type ThemeSettingsSelectablePreset,
   type ThemeTokens,
 } from "./settings/themeTokens";
+import {
+  loadFeedbackSurveySettings,
+  resolveFeedbackSurveySnoozeUntil,
+  saveFeedbackSurveySettings,
+  shouldShowFeedbackSurvey,
+  type FeedbackSurveySettings,
+  type FeedbackSurveySnoozeOption,
+} from "./settings/dashboardSettings";
 import OnboardingWizard from "./components/onboarding/OnboardingWizard";
 import {
   loadOnboardingDraft,
@@ -35,6 +45,7 @@ import {
   resumeOnboardingFromSettings,
   shouldAutoOpenOnboarding,
 } from "./settings/onboarding";
+import { submitFeedbackReport } from "./services/feedback";
 
 const VIDEO_WALLPAPER_EXTENSIONS = [".mp4", ".webm", ".ogg", ".ogv", ".mov", ".m4v"];
 
@@ -51,6 +62,13 @@ export default function App() {
   const [sideSlots, setSideSlots] = useState<SideWidgetSlots>(() => loadLayoutConfig(widgetConstraints).sideSlots);
   const [wizardOpen, setWizardOpen] = useState<boolean>(() => shouldAutoOpenOnboarding());
   const [layoutRefreshKey, setLayoutRefreshKey] = useState(0);
+  const [feedbackSurveySettings, setFeedbackSurveySettings] = useState<FeedbackSurveySettings>(() =>
+    loadFeedbackSurveySettings()
+  );
+  const [surveySubmitting, setSurveySubmitting] = useState(false);
+  const [surveyRefreshTick, setSurveyRefreshTick] = useState(0);
+  const [bugReportOpen, setBugReportOpen] = useState(false);
+  const [bugReportSubmitting, setBugReportSubmitting] = useState(false);
 
   useEffect(() => {
     const savedWallpaper = localStorage.getItem("dashboard-wallpaper");
@@ -65,6 +83,18 @@ export default function App() {
   useEffect(() => {
     saveThemeAutomationSettings(themeAutomation);
   }, [themeAutomation]);
+
+  useEffect(() => {
+    if (feedbackSurveySettings.disabled || !feedbackSurveySettings.nextPromptAt) return;
+    const nextShowAt = new Date(feedbackSurveySettings.nextPromptAt).getTime();
+    if (!Number.isFinite(nextShowAt)) return;
+    const delay = nextShowAt - Date.now();
+    if (delay <= 0) return;
+    const timeoutId = window.setTimeout(() => {
+      setSurveyRefreshTick((prev) => prev + 1);
+    }, Math.min(delay, 2_147_483_647));
+    return () => window.clearTimeout(timeoutId);
+  }, [feedbackSurveySettings]);
 
   const applySettingsPreset = (preset: ThemeSettingsSelectablePreset) => {
     setTheme((prev) => ({
@@ -218,6 +248,55 @@ export default function App() {
 
   const hasOnboardingDraft = Boolean(loadOnboardingDraft());
   const onboardingState = loadOnboardingState();
+  const surveyOpen =
+    shouldShowFeedbackSurvey(feedbackSurveySettings, new Date()) &&
+    !settingsOpen &&
+    !wizardOpen &&
+    !bugReportOpen &&
+    !surveySubmitting;
+
+  const applySurveySettings = (next: FeedbackSurveySettings) => {
+    setFeedbackSurveySettings(next);
+    saveFeedbackSurveySettings(next);
+  };
+
+  const handleSurveySnooze = (option: FeedbackSurveySnoozeOption) => {
+    if (option === "never") {
+      applySurveySettings({ disabled: true, nextPromptAt: null });
+      return;
+    }
+    applySurveySettings({
+      disabled: false,
+      nextPromptAt: resolveFeedbackSurveySnoozeUntil(option),
+    });
+  };
+
+  const handleSurveySubmit = async (payload: { rating: number; message: string }) => {
+    setSurveySubmitting(true);
+    try {
+      await submitFeedbackReport({
+        type: "survey",
+        message: payload.message,
+        rating: payload.rating,
+        includeDiagnostics: false,
+      });
+    } finally {
+      setSurveySubmitting(false);
+    }
+  };
+
+  const handleBugReportSubmit = async (payload: { message: string; includeDiagnostics: boolean }) => {
+    setBugReportSubmitting(true);
+    try {
+      await submitFeedbackReport({
+        type: "bug_report",
+        message: payload.message,
+        includeDiagnostics: payload.includeDiagnostics,
+      });
+    } finally {
+      setBugReportSubmitting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen relative transition-colors duration-500">
@@ -308,6 +387,22 @@ export default function App() {
         onContinueSetupWizard={() => openWizardFromSettings(false)}
         onOpenSetupWizard={() => openWizardFromSettings(false)}
         onRestartSetupWizard={() => openWizardFromSettings(true)}
+        onOpenBugReport={() => {
+          setSettingsOpen(false);
+          setBugReportOpen(true);
+        }}
+      />
+      <FeedbackSurveyPopup
+        open={surveyOpen}
+        submitting={surveySubmitting}
+        onSubmit={handleSurveySubmit}
+        onSnooze={handleSurveySnooze}
+      />
+      <BugReportModal
+        open={bugReportOpen}
+        submitting={bugReportSubmitting}
+        onClose={() => setBugReportOpen(false)}
+        onSubmit={handleBugReportSubmit}
       />
       <OnboardingWizard
         open={wizardOpen}

@@ -38,6 +38,7 @@ interface SettingsModalProps {
   onContinueSetupWizard: () => void;
   onOpenSetupWizard: () => void;
   onRestartSetupWizard: () => void;
+  onOpenBugReport: () => void;
 }
 
 const WALLPAPER_PRESETS = [
@@ -66,6 +67,7 @@ export default function SettingsModal({
   onContinueSetupWizard,
   onOpenSetupWizard,
   onRestartSetupWizard,
+  onOpenBugReport,
 }: SettingsModalProps) {
   const [customUrl, setCustomUrl] = useState("");
   const [dashboardSettings, setDashboardSettings] = useState<DashboardSettings>(() => loadDashboardSettings());
@@ -518,6 +520,23 @@ export default function SettingsModal({
             >
               Leave a review
             </a>
+            <div className="mt-4 pt-4 border-t" style={{ borderColor: "color-mix(in srgb, var(--theme-border) 70%, transparent)" }}>
+              <p className="text-[11px] theme-text-secondary mb-3">
+                Found a bug or pain point? Send a report with a clear preview of what data is shared.
+              </p>
+              <button
+                type="button"
+                className="text-xs px-3 py-1.5 rounded-xl transition-colors"
+                style={{
+                  background: "color-mix(in srgb, var(--theme-surface-hover) 75%, transparent)",
+                  color: "var(--theme-text)",
+                  border: "1px solid color-mix(in srgb, var(--theme-border) 72%, transparent)",
+                }}
+                onClick={onOpenBugReport}
+              >
+                Report a bug
+              </button>
+            </div>
           </section>
         </div>
       </div>
