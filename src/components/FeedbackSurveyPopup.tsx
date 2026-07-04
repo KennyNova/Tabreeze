@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { FeedbackSurveySnoozeOption } from "../settings/dashboardSettings";
 
@@ -13,19 +13,24 @@ const RATING_OPTIONS = [1, 2, 3, 4, 5] as const;
 const CHROME_WEB_STORE_URL = "https://chromewebstore.google.com/detail/tabreeze/nicfglggmbdhllhfeciibfbjdicgbdfa";
 
 export default function FeedbackSurveyPopup({ open, submitting, onSubmit, onSnooze }: FeedbackSurveyPopupProps) {
-  const [rating, setRating] = useState<number>(4);
+  const [rating, setRating] = useState<number | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [confirmPending, setConfirmPending] = useState(false);
   const [snoozeMenuAnchor, setSnoozeMenuAnchor] = useState<{ x: number; y: number } | null>(null);
   const snoozeMenuRef = useRef<HTMLDivElement | null>(null);
 
   const trimmedMessage = useMemo(() => message.trim(), [message]);
-  const canSubmit = trimmedMessage.length > 0 && !submitting;
+  const canSubmit = rating !== null && !submitting;
 
   if (!open) return null;
 
   const handleSubmit = async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || rating === null) return;
+    if (!confirmPending) {
+      setConfirmPending(true);
+      return;
+    }
     try {
       setError(null);
       await onSubmit({ rating, message: trimmedMessage });
@@ -38,12 +43,14 @@ export default function FeedbackSurveyPopup({ open, submitting, onSubmit, onSnoo
         }
       }
       setMessage("");
-      setRating(4);
+      setRating(null);
+      setConfirmPending(false);
       setSnoozeMenuAnchor(null);
       onSnooze("tomorrow");
     } catch (submitError) {
       const nextError = submitError instanceof Error ? submitError.message : "Could not send feedback right now.";
       setError(nextError);
+      setConfirmPending(false);
     }
   };
 
@@ -66,13 +73,14 @@ export default function FeedbackSurveyPopup({ open, submitting, onSubmit, onSnoo
       </div>
 
       <p className="text-[11px] theme-text-secondary leading-relaxed mb-2">
-        Your voice helps shape Tabreeze. Share bugs, pain points, or feature ideas and we will review and act on what
-        the community tells us.
+        Your voice helps shape Tabreeze. Share feature requests, pain points, or bugs.
+        <br />
+        I read every message and act on what the community tells me.
       </p>
 
       <div className="feedback-survey-rating-row" role="radiogroup" aria-label="Tabreeze rating">
         {RATING_OPTIONS.map((value) => {
-          const active = value <= rating;
+          const active = rating !== null && value <= rating;
           return (
             <button
               key={value}
@@ -80,7 +88,10 @@ export default function FeedbackSurveyPopup({ open, submitting, onSubmit, onSnoo
               className={`feedback-survey-rating ${active ? "feedback-survey-rating--active" : ""}`}
               aria-checked={rating === value}
               role="radio"
-              onClick={() => setRating(value)}
+              onClick={() => {
+                setRating(value);
+                setConfirmPending(false);
+              }}
               aria-label={`${value} star${value === 1 ? "" : "s"}`}
             >
               <span aria-hidden="true">★</span>
@@ -91,9 +102,12 @@ export default function FeedbackSurveyPopup({ open, submitting, onSubmit, onSnoo
 
       <textarea
         value={message}
-        onChange={(event) => setMessage(event.target.value)}
+        onChange={(event) => {
+          setMessage(event.target.value);
+          setConfirmPending(false);
+        }}
         className="input-field feedback-survey-textarea"
-        placeholder="Tell us what is not working or what you want next..."
+        placeholder="Feature requests, pain points, or bugs..."
         rows={3}
       />
 
@@ -101,7 +115,7 @@ export default function FeedbackSurveyPopup({ open, submitting, onSubmit, onSnoo
 
       <div className="feedback-survey-actions">
         <button type="button" className="btn-primary text-xs" disabled={!canSubmit} onClick={handleSubmit}>
-          {submitting ? "Sending..." : "Send feedback"}
+          {submitting ? "Sending..." : confirmPending ? "Are you sure??" : "Send feedback"}
         </button>
       </div>
 

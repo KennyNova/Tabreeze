@@ -81,8 +81,13 @@ function buildPayload(input: FeedbackReportInput): FeedbackPayload {
 
 export async function submitFeedbackReport(input: FeedbackReportInput): Promise<void> {
   const message = input.message.trim();
-  if (!message) {
+  const hasRating = typeof input.rating === "number" && Number.isFinite(input.rating);
+
+  if (input.type === "bug_report" && !message) {
     throw new Error("Please share a little detail before sending.");
+  }
+  if (input.type === "survey" && !message && !hasRating) {
+    throw new Error("Please add a rating or a short note before sending.");
   }
 
   const endpoint = getFeedbackEndpointUrl();
