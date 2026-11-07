@@ -148,6 +148,7 @@ function MiniLayoutPreview({
     calendar: "from-pink-500/70 to-rose-500/70",
     weather: "from-blue-500/70 to-indigo-500/70",
     homelab: "from-slate-500/70 to-indigo-500/70",
+    stocks: "from-emerald-500/70 to-lime-500/70",
   };
 
   const updateInteractiveTile = (

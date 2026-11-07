@@ -8,6 +8,7 @@ import TasksWidget from "./TasksWidget";
 import CalendarWidget from "./CalendarWidget";
 import WeatherWidget from "./WeatherWidget";
 import HomelabWidget from "./HomelabSidebar";
+import StocksWidget from "./StocksWidget";
 import type { TileItem, WidgetConstraintsMap, WidgetType } from "../layout/types";
 
 export interface WidgetDefinition {
@@ -114,6 +115,16 @@ export const widgetDefinitions: Record<WidgetType, WidgetDefinition> = {
     maxRowSpan: 5,
     render: () => <HomelabWidget />,
   },
+  stocks: {
+    label: "Stocks",
+    defaultColSpan: 4,
+    defaultRowSpan: 3,
+    minColSpan: 3,
+    maxColSpan: 12,
+    minRowSpan: 1,
+    maxRowSpan: 5,
+    render: (tile) => <StocksWidget colSpan={tile.colSpan} rowSpan={tile.rowSpan} />,
+  },
 };
 
 function buildWidgetConstraints(): WidgetConstraintsMap {
@@ -142,6 +153,7 @@ export function renderWidgetIcon(type: WidgetType): ReactNode {
   if (type === "quotes") return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M7 8h6M7 12h10M7 16h5M5 4h14a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z" /></svg>;
   if (type === "tasks") return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M9 6h11M9 12h11M9 18h11M5 6h.01M5 12h.01M5 18h.01" /></svg>;
   if (type === "calendar") return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M8 3v3m8-3v3M4 9h16M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>;
+  if (type === "stocks") return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M3 17l6-6 4 4 8-8M15 7h6v6" /></svg>;
   if (type === "weather") return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M3 15a4 4 0 014-4 5 5 0 019.6-1.5A3.5 3.5 0 0117.5 17H6a3 3 0 01-3-2z" /></svg>;
   return <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 100 6h13.5a3 3 0 100-6m-16.5-3a3 3 0 013-3h13.5a3 3 0 013 3m-19.5 0a4.5 4.5 0 01.9-2.7L5.737 5.1a3.375 3.375 0 012.7-1.35h7.126c1.062 0 2.062.5 2.7 1.35l2.587 3.45a4.5 4.5 0 01.9 2.7m0 0a3 3 0 01-3 3m0 3h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008zm-3 6h.008v.008h-.008v-.008zm0-6h.008v.008h-.008v-.008z" /></svg>;
 }

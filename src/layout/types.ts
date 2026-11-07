@@ -10,7 +10,8 @@ export type WidgetType =
   | "tasks"
   | "calendar"
   | "weather"
-  | "homelab";
+  | "homelab"
+  | "stocks";
 
 export type LayoutMode = "reactive" | "customBreakpoints";
 export type ReactivePreset = "balanced" | "focus" | "dense";

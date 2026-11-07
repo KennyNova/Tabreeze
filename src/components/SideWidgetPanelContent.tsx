@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import StocksWidget from "./StocksWidget";
 import type { WidgetType } from "../layout/types";
 import { executeDashboardSearch } from "../search/executeSearch";
 import { getAvailableSearchSources, loadCustomSearchSources, resolveSearchSource } from "../search/sources";
@@ -1752,6 +1753,7 @@ function SideGreetingPanel() {
 
 export default function SideWidgetPanelContent({ widget, side }: SideWidgetPanelContentProps) {
   if (widget === "homelab") return <HomelabWidget />;
+  if (widget === "stocks") return <StocksWidget compactList />;
   if (widget === "search") return <SideSearchPanel side={side} />;
   if (widget === "weather") return <SideWeatherPanel />;
   if (widget === "tasks") return <SideTasksPanel />;

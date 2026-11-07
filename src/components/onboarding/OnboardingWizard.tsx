@@ -449,6 +449,7 @@ const PREVIEW_TILE_LABELS: Record<TileItem["type"], string> = {
   calendar: "Calendar",
   weather: "Weather",
   homelab: "Homelab",
+  stocks: "Stocks",
 };
 
 const PREVIEW_TILE_COLORS: Record<TileItem["type"], { bg: string; border: string; text: string }> = {
@@ -491,6 +492,11 @@ const PREVIEW_TILE_COLORS: Record<TileItem["type"], { bg: string; border: string
     bg: "color-mix(in srgb, #14b8a6 22%, transparent)",
     border: "color-mix(in srgb, #14b8a6 52%, transparent)",
     text: "color-mix(in srgb, #ccfbf1 92%, var(--theme-text) 8%)",
+  },
+  stocks: {
+    bg: "color-mix(in srgb, #84cc16 20%, transparent)",
+    border: "color-mix(in srgb, #84cc16 50%, transparent)",
+    text: "color-mix(in srgb, #ecfccb 94%, var(--theme-text) 6%)",
   },
 };
 
@@ -600,6 +606,7 @@ function previewWeightForPreset(
       weather: 65,
       quotes: 60,
       homelab: 55,
+      stocks: 54,
     },
     "deep-work": {
       search: 110,
@@ -610,11 +617,13 @@ function previewWeightForPreset(
       quotes: 60,
       weather: 50,
       homelab: 40,
+      stocks: 39,
     },
     "signal-hub": {
       search: 110,
       weather: 100,
       homelab: 96,
+      stocks: 95,
       calendar: 86,
       bookmarks: 82,
       quotes: 78,
@@ -630,12 +639,14 @@ function previewWeightForPreset(
       greeting: 68,
       weather: 58,
       homelab: 52,
+      stocks: 51,
     },
     "ops-center": {
       search: 110,
       tasks: 100,
       weather: 96,
       homelab: 92,
+      stocks: 91,
       calendar: 84,
       bookmarks: 78,
       quotes: 64,
@@ -647,6 +658,7 @@ function previewWeightForPreset(
       calendar: 94,
       weather: 90,
       homelab: 88,
+      stocks: 87,
       bookmarks: 84,
       quotes: 80,
       greeting: 76,
@@ -659,6 +671,7 @@ function previewWeightForPreset(
       bookmarks: 84,
       quotes: 82,
       homelab: 80,
+      stocks: 79,
       greeting: 78,
     },
   };
@@ -693,6 +706,7 @@ function previewSpanForPreset(
       calendar: { colSpan: 6, rowSpan: 2 },
       weather: { colSpan: 6, rowSpan: 2 },
       homelab: { colSpan: 12, rowSpan: 2 },
+      stocks: { colSpan: 6, rowSpan: 2 },
     },
     "deep-work": {
       greeting: { colSpan: 4, rowSpan: 1 },
@@ -703,6 +717,7 @@ function previewSpanForPreset(
       calendar: { colSpan: 4, rowSpan: 3 },
       weather: { colSpan: 4, rowSpan: 2 },
       homelab: { colSpan: 12, rowSpan: 1 },
+      stocks: { colSpan: 6, rowSpan: 2 },
     },
     "signal-hub": {
       greeting: { colSpan: 4, rowSpan: 1 },
@@ -713,6 +728,7 @@ function previewSpanForPreset(
       calendar: { colSpan: 4, rowSpan: 2 },
       weather: { colSpan: 4, rowSpan: 2 },
       homelab: { colSpan: 8, rowSpan: 2 },
+      stocks: { colSpan: 6, rowSpan: 2 },
     },
     "research-desk": {
       greeting: { colSpan: 4, rowSpan: 1 },
@@ -723,6 +739,7 @@ function previewSpanForPreset(
       calendar: { colSpan: 4, rowSpan: 2 },
       weather: { colSpan: 4, rowSpan: 2 },
       homelab: { colSpan: 8, rowSpan: 2 },
+      stocks: { colSpan: 6, rowSpan: 2 },
     },
     "ops-center": {
       greeting: { colSpan: 4, rowSpan: 1 },
@@ -733,6 +750,7 @@ function previewSpanForPreset(
       calendar: { colSpan: 6, rowSpan: 2 },
       weather: { colSpan: 4, rowSpan: 2 },
       homelab: { colSpan: 8, rowSpan: 2 },
+      stocks: { colSpan: 6, rowSpan: 2 },
     },
     everything: {
       greeting: { colSpan: 4, rowSpan: 1 },
@@ -743,6 +761,7 @@ function previewSpanForPreset(
       calendar: { colSpan: 4, rowSpan: 2 },
       weather: { colSpan: 4, rowSpan: 2 },
       homelab: { colSpan: 8, rowSpan: 2 },
+      stocks: { colSpan: 6, rowSpan: 2 },
     },
     spotlight: {
       greeting: { colSpan: 4, rowSpan: 1 },
@@ -753,6 +772,7 @@ function previewSpanForPreset(
       calendar: { colSpan: 4, rowSpan: 2 },
       weather: { colSpan: 4, rowSpan: 2 },
       homelab: { colSpan: 6, rowSpan: 2 },
+      stocks: { colSpan: 6, rowSpan: 2 },
     },
   };
   return byStrategy[strategy][type];
