@@ -3,7 +3,7 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import BreakpointManagerPanel from "./layout/BreakpointManagerPanel";
 import GridConfigPanel from "./layout/GridConfigPanel";
-import { renderWidgetIcon, TileContent, widgetConstraints, widgetDefinitions } from "./widgetRegistry";
+import { renderWidgetIcon, selectableWidgetTypes, TileContent, widgetConstraints, widgetDefinitions } from "./widgetRegistry";
 import { createDefaultLayoutConfigV2, defaultTileLayout, LAYOUT_SIDE_SLOTS_UPDATED_EVENT } from "../layout/constants";
 import {
   createDefaultProfilesFromLayout,
@@ -16,6 +16,7 @@ import { ANIMATION_STYLES, deriveReactiveGrid, effectiveReactiveCols, REACTIVE_P
 import { loadLayoutConfig, saveLayoutConfig } from "../layout/storage";
 import {
   clamp,
+  findFirstAvailablePosition,
   generateTileId,
   layoutForDisplay,
   normalizeLayout,
@@ -324,6 +325,12 @@ export default function TileLayout() {
     () => loadDashboardSettings().showCustomizeButton
   );
   const [openSearchSourceMenuTileId, setOpenSearchSourceMenuTileId] = useState<string | null>(null);
+  /** Viewport anchor for the Add widget menu; null when closed */
+  const [addWidgetMenuAnchor, setAddWidgetMenuAnchor] = useState<{ top: number; left: number } | null>(null);
+  const showAddWidgetMenu = addWidgetMenuAnchor !== null;
+  const [recentlyAddedTileId, setRecentlyAddedTileId] = useState<string | null>(null);
+  const addWidgetButtonRef = useRef<HTMLButtonElement>(null);
+  const addWidgetMenuRef = useRef<HTMLDivElement>(null);
   const availableSearchSources = useMemo(
     () => getAvailableSearchSources(customSearchSources),
     [customSearchSources]
@@ -353,8 +360,60 @@ export default function TileLayout() {
   }, [editMode]);
 
   useEffect(() => {
-    if (!editMode) setOpenSearchSourceMenuTileId(null);
+    if (!editMode) {
+      setOpenSearchSourceMenuTileId(null);
+      setAddWidgetMenuAnchor(null);
+    }
   }, [editMode]);
+
+  useEffect(() => {
+    if (!showAddWidgetMenu) return;
+    const close = () => setAddWidgetMenuAnchor(null);
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (addWidgetMenuRef.current?.contains(target) || addWidgetButtonRef.current?.contains(target)) return;
+      close();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [showAddWidgetMenu]);
+
+  const toggleAddWidgetMenu = () => {
+    if (showAddWidgetMenu) {
+      setAddWidgetMenuAnchor(null);
+      return;
+    }
+    const rect = addWidgetButtonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const menuWidth = 224;
+    setAddWidgetMenuAnchor({
+      top: rect.bottom + 6,
+      left: clamp(rect.left, 8, Math.max(8, window.innerWidth - menuWidth - 8)),
+    });
+  };
+
+  useEffect(() => {
+    if (!recentlyAddedTileId) return;
+    const frame = window.requestAnimationFrame(() => {
+      tileRefs.current.get(recentlyAddedTileId)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+    const timer = window.setTimeout(() => setRecentlyAddedTileId(null), 1600);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [recentlyAddedTileId]);
 
   useEffect(() => {
     if (!openSearchSourceMenuTileId) return;
@@ -854,6 +913,15 @@ export default function TileLayout() {
     });
   };
 
+  const addTile = (type: WidgetType) => {
+    const def = widgetDefinitions[type];
+    const colSpan = clamp(def.defaultColSpan, Math.min(def.minColSpan, activeGridCols), Math.min(def.maxColSpan, activeGridCols));
+    const tile: TileItem = { id: generateTileId(type), type, colStart: 1, rowStart: 1, colSpan, rowSpan: def.defaultRowSpan };
+    setTiles((prev) => [...prev, { ...tile, ...findFirstAvailablePosition(tile, prev, activeGridCols) }]);
+    setAddWidgetMenuAnchor(null);
+    setRecentlyAddedTileId(tile.id);
+  };
+
   const removeTile = (id: string) => {
     setTiles((prev) => (prev.length <= 1 ? prev : prev.filter((tile) => tile.id !== id)));
   };
@@ -1052,12 +1120,55 @@ export default function TileLayout() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-xs text-gray-500/70 dark:text-white/35">
           {editMode
-            ? "Edit mode: drag and resize tiles on the page. Open Layout settings for breakpoints, grid, and widgets."
+            ? "Edit mode: drag and resize tiles on the page. Use Add widget for new tiles, or Layout settings for breakpoints and grid."
             : "Your tab layout is fully customizable."}
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           {editMode && (
             <>
+              <button
+                ref={addWidgetButtonRef}
+                type="button"
+                className="text-xs inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 border border-blue-400/45 bg-blue-500/15 text-blue-700 dark:text-blue-200 hover:bg-blue-500/25 transition-colors"
+                onClick={toggleAddWidgetMenu}
+                aria-haspopup="menu"
+                aria-expanded={showAddWidgetMenu}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14m7-7H5" />
+                </svg>
+                Add widget
+              </button>
+              {addWidgetMenuAnchor && typeof document !== "undefined" && createPortal(
+                <div
+                  ref={addWidgetMenuRef}
+                  role="menu"
+                  className="fixed z-[150] w-56 max-h-80 overflow-y-auto
+                             rounded-xl border border-black/10 dark:border-white/[0.14]
+                             bg-white/95 dark:bg-[#1c1c1e]/95 backdrop-blur-md shadow-xl animate-in"
+                  style={{ top: addWidgetMenuAnchor.top, left: addWidgetMenuAnchor.left }}
+                >
+                  {selectableWidgetTypes.map((type) => {
+                    const count = layoutSlice.filter((tile) => tile.type === type).length;
+                    return (
+                      <button
+                        key={type}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => addTile(type)}
+                        className="w-full text-left px-3 py-2 text-[11px] flex items-center gap-2 transition-colors text-gray-700 dark:text-white/80 hover:bg-black/[0.04] dark:hover:bg-white/[0.08]"
+                      >
+                        <span className="shrink-0 text-current [&>svg]:w-4 [&>svg]:h-4">{renderWidgetIcon(type)}</span>
+                        <span className="flex-1 truncate">{widgetDefinitions[type].label}</span>
+                        {count > 0 && (
+                          <span className="text-[10px] tabular-nums text-gray-500/70 dark:text-white/40">{count} on page</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>,
+                document.body
+              )}
               <button
                 type="button"
                 className="text-xs inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 border border-violet-400/45 bg-violet-500/15 text-violet-700 dark:text-violet-200 hover:bg-violet-500/25 transition-colors"
@@ -1266,7 +1377,7 @@ export default function TileLayout() {
             return (
               <div key={tile.id}
                 ref={(node) => { if (node) tileRefs.current.set(tile.id, node); else tileRefs.current.delete(tile.id); }}
-                className={`relative min-h-0 ${editMode ? "rounded-2xl border border-dashed border-black/10 dark:border-white/15 p-2" : ""} transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]`}
+                className={`relative min-h-0 ${editMode ? "rounded-2xl border border-dashed border-black/10 dark:border-white/15 p-2" : ""} ${recentlyAddedTileId === tile.id ? "ring-2 ring-blue-500/50 dark:ring-blue-400/55" : ""} transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]`}
                 style={{
                   gridColumn: `${colStart} / span ${colSpan}`,
                   gridRow: `${tile.rowStart} / span ${rowSpan}`,
