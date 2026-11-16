@@ -1,7 +1,7 @@
 {
   "name": "tabreeze",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,6 +9,8 @@
     "reload:ext": "node scripts/reload-extension.mjs",
     "build": "tsc && vite build",
     "pack:ext": "node scripts/package-extension.mjs",
+    "publish:ext": "node scripts/publish-extension.mjs",
+    "auth:cws": "node scripts/cws-auth.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

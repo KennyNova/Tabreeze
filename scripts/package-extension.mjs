@@ -31,7 +31,7 @@ function run(command, args, label, cwd = rootDir) {
   const result = spawnSync(command, args, {
     cwd,
     stdio: "inherit",
-    shell: false,
+    shell: process.platform === "win32",
   });
   if (result.status !== 0) fail(`${label} failed.`);
 }
@@ -87,6 +87,8 @@ function collectFiles(dir, baseDir = dir, out = []) {
 
 function createZipFromStaging() {
   if (process.platform === "win32") {
+    const source = `${stagingDir}\\*`.replace(/'/g, "''");
+    const destination = zipPath.replace(/'/g, "''");
     run(
       "powershell.exe",
       [
@@ -94,7 +96,7 @@ function createZipFromStaging() {
         "-ExecutionPolicy",
         "Bypass",
         "-Command",
-        `Compress-Archive -Path "${stagingDir}\\*" -DestinationPath "${zipPath}" -Force`,
+        `Compress-Archive -Path '${source}' -DestinationPath '${destination}' -Force`,
       ],
       "Zip creation"
     );
