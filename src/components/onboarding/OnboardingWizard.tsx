@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
-import { widgetConstraints } from "../widgetRegistry";
+import { renderWidgetIcon, widgetConstraints } from "../widgetRegistry";
 import ThemeSwatchPanel from "../ThemeSwatchPanel";
 import SearchSourceLogo from "../../search/SearchSourceLogo";
 import { loadLayoutConfig, saveLayoutConfig } from "../../layout/storage";
@@ -315,6 +315,7 @@ function inferThemeChoiceFromTheme(theme: ThemeState): OnboardingAnswers["themeC
 }
 
 const PRESET_PREVIEW_CONFIG = { cols: 12, rowHeight: 11, gap: 3 };
+const CUSTOM_LAYOUT_PREVIEW_ID = "__custom-layout__";
 const ALL_WIDGETS: OnboardingWidgetId[] = [
   "greeting",
   "search",
@@ -920,6 +921,22 @@ function hasTileOverlap(layout: TileItem[]): boolean {
   return false;
 }
 
+function clampLayoutToCols(layout: TileItem[], cols: number): TileItem[] {
+  return layout.map((tile) => {
+    const constraints = widgetConstraints[tile.type];
+    const colSpan = Math.max(
+      constraints.minColSpan,
+      Math.min(constraints.maxColSpan, Math.max(1, cols), tile.colSpan)
+    );
+    const maxColStart = Math.max(1, cols - colSpan + 1);
+    return {
+      ...tile,
+      colSpan,
+      colStart: Math.max(1, Math.min(tile.colStart, maxColStart)),
+    };
+  });
+}
+
 export default function OnboardingWizard({
   open,
   theme,
@@ -936,6 +953,7 @@ export default function OnboardingWizard({
     profileId: string;
     tileId: string;
     mode: PreviewInteractionMode;
+    cols: number;
     startX: number;
     startY: number;
     startTile: TileItem;
@@ -959,6 +977,9 @@ export default function OnboardingWizard({
   const [hasVisitedReview, setHasVisitedReview] = useState(false);
   const [wizardError, setWizardError] = useState("");
   const [presetPreviewOverrides, setPresetPreviewOverrides] = useState<Record<string, TileItem[]>>({});
+  const [selectedCustomTileId, setSelectedCustomTileId] = useState<string | null>(null);
+  const [customGridWidth, setCustomGridWidth] = useState(12);
+  const [customGridHeight, setCustomGridHeight] = useState(6);
   const previewInteractionRef = useRef<PreviewInteractionState | null>(null);
   const presetDefaultLayoutsRef = useRef<Record<string, TileItem[]>>({});
   const globePhiRef = useRef(0);
@@ -1030,25 +1051,26 @@ export default function OnboardingWizard({
     profileId: string,
     tile: TileItem,
     layout: TileItem[],
-    mode: PreviewInteractionMode
+    mode: PreviewInteractionMode,
+    previewConfig: { cols: number; rowHeight: number; gap: number } = PRESET_PREVIEW_CONFIG
   ) => {
     event.preventDefault();
     event.stopPropagation();
     const target = event.currentTarget as HTMLElement;
     const grid = target.parentElement;
-    const config = PRESET_PREVIEW_CONFIG;
-    const usableWidth = Math.max(120, (grid?.clientWidth ?? 220) - (config.cols - 1) * config.gap);
-    const colWidth = usableWidth / config.cols;
+    const usableWidth = Math.max(120, (grid?.clientWidth ?? 220) - (previewConfig.cols - 1) * previewConfig.gap);
+    const colWidth = usableWidth / previewConfig.cols;
     previewInteractionRef.current = {
       profileId,
       tileId: tile.id,
       mode,
+      cols: previewConfig.cols,
       startX: event.clientX,
       startY: event.clientY,
       startTile: { ...tile },
       startLayout: layout.map((item) => ({ ...item })),
-      colStep: colWidth + config.gap,
-      rowStep: config.rowHeight + config.gap,
+      colStep: colWidth + previewConfig.gap,
+      rowStep: previewConfig.rowHeight + previewConfig.gap,
     };
     if (typeof document !== "undefined") {
       document.body.style.cursor = mode === "resize" ? "nwse-resize" : "grabbing";
@@ -1061,19 +1083,19 @@ export default function OnboardingWizard({
       if (!interaction) return;
       const deltaX = event.clientX - interaction.startX;
       const deltaY = event.clientY - interaction.startY;
-      const config = PRESET_PREVIEW_CONFIG;
+      const cols = interaction.cols;
       const deltaCols = Math.round(deltaX / Math.max(1, interaction.colStep));
       const deltaRows = Math.round(deltaY / Math.max(1, interaction.rowStep));
       const nextLayout = interaction.startLayout.map((tile) => {
         if (tile.id !== interaction.tileId) return tile;
         if (interaction.mode === "move") {
-          const nextColStart = Math.max(1, Math.min(config.cols, interaction.startTile.colStart + deltaCols));
+          const nextColStart = Math.max(1, Math.min(cols, interaction.startTile.colStart + deltaCols));
           const nextRowStart = Math.max(1, interaction.startTile.rowStart + deltaRows);
           return { ...tile, colStart: nextColStart, rowStart: nextRowStart };
         }
-        const nextColSpan = Math.max(1, Math.min(config.cols, interaction.startTile.colSpan + deltaCols));
+        const nextColSpan = Math.max(1, Math.min(cols, interaction.startTile.colSpan + deltaCols));
         const nextRowSpan = Math.max(1, interaction.startTile.rowSpan + deltaRows);
-        const clampedColSpan = Math.min(nextColSpan, config.cols - tile.colStart + 1);
+        const clampedColSpan = Math.min(nextColSpan, cols - tile.colStart + 1);
         return { ...tile, colSpan: clampedColSpan, rowSpan: nextRowSpan };
       });
       applyPresetOverride(interaction.profileId, nextLayout);
@@ -1158,6 +1180,10 @@ export default function OnboardingWizard({
     setExpandedFolderIds(["1"]);
     setHasVisitedReview(false);
     setPresetPreviewOverrides({});
+    const mappedGrid = densityToPreset(seededAnswers.customDensity);
+    setCustomGridWidth(mappedGrid.cols);
+    setCustomGridHeight(6);
+    setSelectedCustomTileId(null);
     const draftAnswers = draft?.answers;
     const initialLatCandidate = draftAnswers?.weather.customLat ?? weather.customLat;
     const initialLonCandidate = draftAnswers?.weather.customLon ?? weather.customLon;
@@ -1263,6 +1289,21 @@ export default function OnboardingWizard({
     return normalizedLayout;
   };
 
+  const customLayoutPreviewTiles = useMemo(() => {
+    const baseLayout = buildLayoutFromAnswers();
+    return reconcilePresetLayout(baseLayout, presetPreviewOverrides[CUSTOM_LAYOUT_PREVIEW_ID]);
+  }, [answers, presetPreviewOverrides]);
+
+  const customLayoutTilesForGrid = useMemo(
+    () => clampLayoutToCols(customLayoutPreviewTiles, customGridWidth),
+    [customLayoutPreviewTiles, customGridWidth]
+  );
+
+  const customLayoutHasOverlap = useMemo(
+    () => hasTileOverlap(customLayoutTilesForGrid),
+    [customLayoutTilesForGrid]
+  );
+
   const activePresetHasOverlap = useMemo(() => {
     if (!activePresetProfile) return false;
     const baseLayout = buildLayoutFromAnswers();
@@ -1274,7 +1315,7 @@ export default function OnboardingWizard({
   const persistSelections = (nextStep: OnboardingStepId): boolean => {
     try {
       const normalizedAnswers = normalizePresetSelection(answers);
-      const answersForPersist: OnboardingAnswers =
+      let answersForPersist: OnboardingAnswers =
         normalizedAnswers.quoteSelectionMode === "poet-collection" &&
         normalizedAnswers.quotePoetCategoryIds.length === 0
           ? { ...normalizedAnswers, quoteSelectionMode: "theme" }
@@ -1307,9 +1348,16 @@ export default function OnboardingWizard({
         layoutConfig.reactive.preferredGridCols = preset?.recommendedMaxCols ?? 12;
       } else if (answersForPersist.path === "custom") {
         layoutConfig.mode = "reactive";
-        const mapped = densityToPreset(answersForPersist.customDensity);
+        const derivedDensity: OnboardingAnswers["customDensity"] =
+          customGridWidth <= 10 ? "comfortable" : customGridWidth >= 12 ? "dense" : "balanced";
+        answersForPersist = { ...answersForPersist, customDensity: derivedDensity };
+        const mapped = densityToPreset(derivedDensity);
         layoutConfig.reactive.preset = mapped.preset;
-        layoutConfig.reactive.preferredGridCols = mapped.cols;
+        layoutConfig.reactive.preferredGridCols = customGridWidth;
+        layoutConfig.reactive.layout = clampLayoutToCols(
+          reconcilePresetLayout(baseLayout, presetPreviewOverrides[CUSTOM_LAYOUT_PREVIEW_ID]),
+          customGridWidth
+        );
       }
       saveLayoutConfig(layoutConfig);
 
@@ -1378,6 +1426,7 @@ export default function OnboardingWizard({
   const canContinue = (() => {
     if (stepId === "path") return answers.path !== null;
     if (stepId === "presetLayout") return availablePresetProfiles.length > 0 && !activePresetHasOverlap;
+    if (stepId === "customLayout") return !customLayoutHasOverlap;
     if (stepId === "contentMode" && answers.contentMode === "news" && answers.newsSourceId === NEWS_CUSTOM_SOURCE_ID) {
       return Boolean(answers.newsCustomRssUrl.trim());
     }
@@ -1564,27 +1613,68 @@ export default function OnboardingWizard({
           </div>
 
           <div className="onboarding-welcome-content">
+            <div className="onboarding-step-chip">
+              Step {stepIndex + 1} of {stepRail.length}
+            </div>
             <p className="onboarding-welcome-kicker">
-              Your new tab, reimagined
+              A better new tab, from day one
             </p>
             <p className="onboarding-welcome-subtitle theme-text">
-              Build a command center that feels intentional from the first second. Start with a polished baseline, then personalize it to match exactly how you think and work.
+              Start with a polished baseline in minutes, then shape it around your workflow.
             </p>
             <div className="onboarding-welcome-tour-grid">
               {[
-                { title: "Smart Search", note: "Search Google, ChatGPT, Claude, Perplexity and more from one keyboard-first bar." },
-                { title: "Adaptive Layout", note: "Drag, resize, and shape your dashboard so every widget sits where your brain expects it." },
-                { title: "Live Context", note: "Weather, tasks, bookmarks, calendar, and headlines stay visible the moment a tab opens." },
-                { title: "Visual Identity", note: "Curated themes, random palettes, and wallpaper control make the page unmistakably yours." },
+                {
+                  title: "Pick your widgets",
+                  note: "Choose what appears every time a tab opens.",
+                  preview: "widgets",
+                },
+                {
+                  title: "Choose your setup path",
+                  note: "Preset for speed or custom for deeper control.",
+                  preview: "path",
+                },
+                {
+                  title: "Set your style",
+                  note: "Finish with your preferred theme and wallpaper.",
+                  preview: "style",
+                },
               ].map((item, idx) => (
                 <div
                   key={item.title}
                   className="onboarding-welcome-tour-card"
-                  style={{ animationDelay: `${1.55 + idx * 0.1}s` }}
+                  style={{ animationDelay: `${1.93 + idx * 0.145}s` }}
                 >
-                  <div className="text-[11px] uppercase tracking-[0.14em] theme-text-secondary">Feature</div>
                   <div className="text-[14px] font-semibold theme-text mt-1">{item.title}</div>
                   <div className="text-[12px] theme-text-secondary mt-1.5">{item.note}</div>
+                  <div className="onboarding-welcome-card-preview" aria-hidden="true">
+                    {item.preview === "widgets" ? (
+                      <div className="onboarding-welcome-card-preview-widgets">
+                        <span />
+                        <span />
+                        <span />
+                        <span />
+                        <span />
+                        <span />
+                      </div>
+                    ) : null}
+                    {item.preview === "path" ? (
+                      <div className="onboarding-welcome-card-preview-path">
+                        <span className="dot" />
+                        <span className="line" />
+                        <span className="dot" />
+                        <span className="line" />
+                        <span className="dot" />
+                      </div>
+                    ) : null}
+                    {item.preview === "style" ? (
+                      <div className="onboarding-welcome-card-preview-style">
+                        <span className="swatch one" />
+                        <span className="swatch two" />
+                        <span className="swatch three" />
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               ))}
             </div>
@@ -1594,15 +1684,16 @@ export default function OnboardingWizard({
                 background: "color-mix(in srgb, var(--theme-surface) 55%, transparent)",
               }}
             >
-              <div className="text-[11px] uppercase tracking-[0.14em] theme-text-secondary">What happens next</div>
+              <div className="text-[11px] uppercase tracking-[0.14em] theme-text-secondary">Quick flow</div>
               <p className="text-sm theme-text mt-1">
-                Next, pick your widgets. Right after that, choose <span className="font-semibold">Preset</span> for a ready-made layout or <span className="font-semibold">Customize</span> for full control.
+                First choose widgets, then pick <span className="font-semibold">Preset</span> for the fastest start or <span className="font-semibold">Customize</span> for a hands-on setup.
               </p>
             </div>
           </div>
-          <p className="onboarding-welcome-footer text-xs theme-text-secondary">
-            No account. No tracking. Just a better place to land every time you hit Ctrl+T.
-          </p>
+          <div className="onboarding-welcome-footer text-xs theme-text-secondary">
+            <p>open source · private · account-free</p>
+            <p className="mt-0.5">forever</p>
+          </div>
         </div>
       );
     }
@@ -1658,53 +1749,45 @@ export default function OnboardingWizard({
       const presetTimeline: Array<{ title: string; detail: string; viz: JSX.Element | null }> = [
         {
           title: "Pick your widgets",
-          detail:
-            "Toggle what belongs on every new tab. Preset keeps the wizard short—we only drill into widgets you turned on.",
+          detail: "Choose what you want on your dashboard.",
           viz: pathVizMap.widgets,
         },
         {
-          title: "Apply a finished layout pack",
-          detail:
-            "Choose a blueprint and we drop cards into place with spacing and columns already tuned—no fiddling required.",
+          title: "Apply a preset layout",
+          detail: "Start with a ready-made arrangement.",
           viz: pathVizMap.blueprint,
         },
         {
-          title: "Set the look and finish",
-          detail:
-            "Pick theme + wallpaper, run any optional widget screens that matter, then review and save in one pass.",
+          title: "Finish and launch",
+          detail: "Set your look, review, and open your dashboard.",
           viz: pathVizMap.review,
         },
       ];
 
       const customTimeline: Array<{ title: string; detail: string; viz: JSX.Element | null }> = [
         {
-          title: "Pick your widgets deliberately",
-          detail:
-            "Every module you toggle unlocks finer steps later—you control breadth before we touch density or integrations.",
+          title: "Pick your widgets",
+          detail: "Choose your modules before deeper setup.",
           viz: pathVizMap.widgets,
         },
         {
-          title: "Choose your layout density",
-          detail:
-            "Select Comfortable, Balanced, or Dense to control spacing and information pressure before deeper setup.",
+          title: "Choose layout density",
+          detail: "Decide how spacious or compact it feels.",
           viz: pathVizMap.density,
         },
         {
-          title: "Theme and wallpaper artistry",
-          detail:
-            "Same surfaces as preset, but the intent is personal curation—you can revisit tokens or swap wallpaper until it clicks.",
+          title: "Set theme and wallpaper",
+          detail: "Personalize the visual style early.",
           viz: pathVizMap.theme,
         },
         {
-          title: "Per-widget mastery",
-          detail:
-            "Folders, ICS links, locales, RSS, homelab pings—everything gets explicit rows so power users never fight defaults.",
+          title: "Configure each widget",
+          detail: "Tune details only for widgets you enabled.",
           viz: pathVizMap.review,
         },
         {
           title: "Review and finalize",
-          detail:
-            "The final review shows your full stack so you can jump back, adjust, and then lock it in.",
+          detail: "Confirm everything, then launch.",
           viz: pathVizMap.blueprint,
         },
       ];
@@ -1716,8 +1799,7 @@ export default function OnboardingWizard({
       return (
         <div className="space-y-5">
           <p className="text-sm theme-text-secondary leading-relaxed">
-            <span className="font-semibold theme-text">Preset</span> is the fast lane: curated layouts snap in so you ship a polished new tab fast.{" "}
-            <span className="font-semibold theme-text">Custom</span> swaps the blueprint step for density control plus deeper drawers on every gadget you enabled.
+            Choose how hands-on you want setup to be.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {([
@@ -1725,13 +1807,13 @@ export default function OnboardingWizard({
                 id: "preset",
                 title: "Use a preset",
                 estimate: "~3–10 min",
-                blurb: "Lets Tabreeze tune grid math for you.",
+                blurb: "Fastest path with ready-made layouts.",
               },
               {
                 id: "custom",
                 title: "Customize with wizard",
                 estimate: customEstimateLabel,
-                blurb: "You steer density and every powered widget.",
+                blurb: "More control over spacing and widget details.",
               },
             ] as const).map((option) => (
               <button
@@ -1764,46 +1846,62 @@ export default function OnboardingWizard({
               className={`onboarding-path-journey${answers.path === "preset" ? " onboarding-path-journey--active" : ""}`}
             >
               <div className="text-xs font-semibold uppercase tracking-[0.12em] theme-text-secondary">Preset timeline</div>
-              <p className="text-xs theme-text-secondary mt-3 leading-snug">
-                Fastest onboarding: blueprint applies immediately after widgets, integrations only surface when relevant, finishing is mostly confirmation.
-              </p>
-              <div className="mt-2">
-                {presetTimeline.map((row, idx) => (
-                  <div key={row.title} className="onboarding-path-step">
-                    <div className="onboarding-path-step-index">{idx + 1}</div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold theme-text">{row.title}</div>
-                      <p className="text-xs theme-text-secondary mt-2 leading-snug">{row.detail}</p>
-                      {row.viz ? (
-                        <div className="onboarding-path-viz">{row.viz}</div>
-                      ) : null}
+              <p className="text-xs theme-text-secondary mt-3 leading-snug">Best for getting started quickly.</p>
+              {answers.path === "preset" ? (
+                <div className="mt-2">
+                  {presetTimeline.map((row, idx) => (
+                    <div key={row.title} className="onboarding-path-step">
+                      <div className="onboarding-path-step-index">{idx + 1}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold theme-text">{row.title}</div>
+                        <p className="text-xs theme-text-secondary mt-2 leading-snug">{row.detail}</p>
+                        {row.viz ? (
+                          <div className="onboarding-path-viz">{row.viz}</div>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <ul className="mt-3 space-y-2">
+                  {presetTimeline.map((row) => (
+                    <li key={row.title} className="text-xs theme-text-secondary">
+                      • {row.title}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
             <div
               className={`onboarding-path-journey${answers.path === "custom" ? " onboarding-path-journey--active" : ""}`}
             >
               <div className="text-xs font-semibold uppercase tracking-[0.12em] theme-text-secondary">Custom timeline</div>
-              <p className="text-xs theme-text-secondary mt-3 leading-snug">
-                Every stage adds control: spacing choices up front and deep configuration afterward, capped by review so nothing stays hidden behind defaults.
-              </p>
-              <div className="mt-2">
-                {customTimeline.map((row, idx) => (
-                  <div key={row.title} className="onboarding-path-step">
-                    <div className="onboarding-path-step-index">{idx + 1}</div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold theme-text">{row.title}</div>
-                      <p className="text-xs theme-text-secondary mt-2 leading-snug">{row.detail}</p>
-                      {row.viz ? (
-                        <div className="onboarding-path-viz">{row.viz}</div>
-                      ) : null}
+              <p className="text-xs theme-text-secondary mt-3 leading-snug">Best when you want more control upfront.</p>
+              {answers.path === "custom" ? (
+                <div className="mt-2">
+                  {customTimeline.map((row, idx) => (
+                    <div key={row.title} className="onboarding-path-step">
+                      <div className="onboarding-path-step-index">{idx + 1}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold theme-text">{row.title}</div>
+                        <p className="text-xs theme-text-secondary mt-2 leading-snug">{row.detail}</p>
+                        {row.viz ? (
+                          <div className="onboarding-path-viz">{row.viz}</div>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <ul className="mt-3 space-y-2">
+                  {customTimeline.map((row) => (
+                    <li key={row.title} className="text-xs theme-text-secondary">
+                      • {row.title}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
         </div>
@@ -1812,19 +1910,19 @@ export default function OnboardingWizard({
 
     if (stepId === "widgetChoice") {
       const widgetMeta: Array<{ id: OnboardingWidgetId; title: string; desc: string }> = [
-        { id: "greeting", title: "Greeting + Clock", desc: "Ground your day the second a tab opens." },
-        { id: "search", title: "Smart Search", desc: "Launch queries to engines and AIs instantly." },
-        { id: "bookmarks", title: "Bookmarks Grid", desc: "Turn buried links into one-glance access." },
-        { id: "tasks", title: "Tasks", desc: "Capture and complete work without leaving the tab." },
-        { id: "calendar", title: "Calendar", desc: "See what is next without opening another app." },
-        { id: "weather", title: "Weather", desc: "Know conditions and forecast before stepping out." },
-        { id: "quotes", title: "Quotes / News", desc: "Choose inspiration or headlines as your pulse." },
-        { id: "homelab", title: "Homelab", desc: "Monitor your self-hosted services at a glance." },
+        { id: "greeting", title: "Greeting + Clock", desc: "A clean start when a new tab opens." },
+        { id: "search", title: "Smart Search", desc: "Search the web and AI tools quickly." },
+        { id: "bookmarks", title: "Bookmarks Grid", desc: "Keep your most-used links in reach." },
+        { id: "tasks", title: "Tasks", desc: "Track what needs to get done." },
+        { id: "calendar", title: "Calendar", desc: "See what is coming up next." },
+        { id: "weather", title: "Weather", desc: "View current conditions at a glance." },
+        { id: "quotes", title: "Quotes / News", desc: "Choose calm inspiration or headlines." },
+        { id: "homelab", title: "Homelab", desc: "Monitor your services in one place." },
       ];
       const selected = new Set(answers.selectedWidgets);
       return (
         <div className="space-y-2.5">
-          <div className="text-xs theme-text-secondary">Pick what should appear on your dashboard.</div>
+          <div className="text-xs theme-text-secondary">Pick the modules you want on your dashboard. You can change this later.</div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {widgetMeta.map((widget) => (
               <button
@@ -2018,33 +2116,263 @@ export default function OnboardingWizard({
     }
 
     if (stepId === "customLayout") {
+      const COLS = customGridWidth;
+      const ROW_H = 36;
+      const GAP = 6;
+      const editorConfig = { cols: COLS, rowHeight: ROW_H, gap: GAP };
+      const defaultPreviewTiles = buildLayoutFromAnswers();
+      const previewTiles = clampLayoutToCols(
+        reconcilePresetLayout(defaultPreviewTiles, presetPreviewOverrides[CUSTOM_LAYOUT_PREVIEW_ID]),
+        COLS
+      );
+      const edited = !areTileLayoutsEqual(defaultPreviewTiles, previewTiles);
+      const maxRow = previewTiles.reduce((acc, tile) => Math.max(acc, tile.rowStart + tile.rowSpan - 1), 1);
+      const totalRows = Math.max(customGridHeight, maxRow + 1);
+      presetDefaultLayoutsRef.current[CUSTOM_LAYOUT_PREVIEW_ID] = defaultPreviewTiles;
+
+      const colorMap: Record<TileItem["type"], { solid: string; glow: string; icon: string }> = {
+        greeting: { solid: "#8b5cf6", glow: "rgba(139,92,246,0.22)", icon: "#c4b5fd" },
+        search:   { solid: "#3b82f6", glow: "rgba(59,130,246,0.22)",  icon: "#93c5fd" },
+        bookmarks:{ solid: "#f59e0b", glow: "rgba(245,158,11,0.20)",  icon: "#fcd34d" },
+        quotes:   { solid: "#ec4899", glow: "rgba(236,72,153,0.20)",  icon: "#f9a8d4" },
+        tasks:    { solid: "#22c55e", glow: "rgba(34,197,94,0.20)",   icon: "#86efac" },
+        calendar: { solid: "#06b6d4", glow: "rgba(6,182,212,0.20)",   icon: "#67e8f9" },
+        weather:  { solid: "#f97316", glow: "rgba(249,115,22,0.20)",  icon: "#fdba74" },
+        homelab:  { solid: "#14b8a6", glow: "rgba(20,184,166,0.20)",  icon: "#5eead4" },
+        stocks:   { solid: "#10b981", glow: "rgba(16,185,129,0.20)",  icon: "#6ee7b7" },
+      };
+
       return (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {([
-            { id: "comfortable", title: "Comfortable", desc: "Larger cards and fewer columns." },
-            { id: "balanced", title: "Balanced", desc: "Default spacing for mixed workflows." },
-            { id: "dense", title: "Dense", desc: "Fits more content on screen." },
-          ] as const).map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              onClick={() => setAnswers((prev) => ({ ...prev, customDensity: option.id }))}
-              className="rounded-2xl border p-4 text-left"
+        <div className="space-y-3">
+          {/* canvas */}
+          <div
+            className="rounded-2xl border overflow-hidden"
+            style={{
+              borderColor: customLayoutHasOverlap
+                ? "color-mix(in srgb, #ef4444 55%, transparent)"
+                : "color-mix(in srgb, var(--theme-border) 58%, transparent)",
+              background: "color-mix(in srgb, var(--theme-bg) 68%, transparent)",
+              boxShadow: "inset 0 1px 0 color-mix(in srgb, white 6%, transparent), 0 16px 48px color-mix(in srgb, black 12%, transparent)",
+            }}
+          >
+            {/* top bar */}
+            <div
+              className="flex items-center justify-between gap-2 px-4 py-2.5 border-b"
+              style={{ borderColor: "color-mix(in srgb, var(--theme-border) 45%, transparent)", background: "color-mix(in srgb, var(--theme-surface) 55%, transparent)" }}
+            >
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full" style={{ background: "color-mix(in srgb, var(--theme-accent) 70%, transparent)" }} />
+                <span className="text-[11px] font-medium theme-text">Layout canvas</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {customLayoutHasOverlap && (
+                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ background: "color-mix(in srgb, #ef4444 18%, transparent)", color: "#ef4444" }}>
+                    Tiles overlap — drag to fix
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="text-[11px] theme-text-secondary hover:theme-text transition-colors px-2 py-0.5 rounded-lg"
+                  style={{ visibility: edited ? "visible" : "hidden", background: "color-mix(in srgb, var(--theme-border) 30%, transparent)" }}
+                  onClick={() => {
+                    setPresetPreviewOverrides((prev) => {
+                      const next = { ...prev };
+                      delete next[CUSTOM_LAYOUT_PREVIEW_ID];
+                      return next;
+                    });
+                    setSelectedCustomTileId(null);
+                  }}
+                >
+                  ↺ Reset
+                </button>
+              </div>
+            </div>
+
+            {/* grid area */}
+            <div
+              className="relative select-none"
+              style={{ padding: "10px" }}
+              onClick={(e) => { if (e.target === e.currentTarget) setSelectedCustomTileId(null); }}
+            >
+              {defaultPreviewTiles.length === 0 ? (
+                <div className="py-16 text-center text-[12px] theme-text-secondary">
+                  Go back and select at least one widget.
+                </div>
+              ) : (
+                <>
+                  {/* grid cell guide background */}
+                  <div
+                    className="absolute inset-0 pointer-events-none"
+                    style={{ padding: "10px" }}
+                    aria-hidden
+                  >
+                    <div
+                      className="w-full h-full grid"
+                      style={{
+                        gridTemplateColumns: `repeat(${COLS}, minmax(0,1fr))`,
+                        gridTemplateRows: `repeat(${totalRows}, ${ROW_H}px)`,
+                        gap: `${GAP}px`,
+                      }}
+                    >
+                      {Array.from({ length: COLS * totalRows }).map((_, i) => (
+                        <div
+                          key={i}
+                          className="rounded-lg"
+                          style={{
+                            background: "color-mix(in srgb, var(--theme-border) 18%, transparent)",
+                            border: "1px solid color-mix(in srgb, var(--theme-border) 22%, transparent)",
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* tiles */}
+                  <div
+                    className="relative w-full grid"
+                    style={{
+                      gridTemplateColumns: `repeat(${COLS}, minmax(0,1fr))`,
+                      gridTemplateRows: `repeat(${totalRows}, ${ROW_H}px)`,
+                      gap: `${GAP}px`,
+                      minHeight: `${totalRows * ROW_H + (totalRows - 1) * GAP}px`,
+                    }}
+                  >
+                    {previewTiles.map((tile) => {
+                      const c = colorMap[tile.type];
+                      const isSelected = selectedCustomTileId === tile.id;
+                      return (
+                        <div
+                          key={`ce-${tile.id}`}
+                          className="relative rounded-xl cursor-grab overflow-hidden transition-all duration-150"
+                          style={{
+                            gridColumn: `${tile.colStart} / span ${tile.colSpan}`,
+                            gridRow: `${tile.rowStart} / span ${Math.max(1, tile.rowSpan)}`,
+                            background: `linear-gradient(145deg, color-mix(in srgb, ${c.solid} 28%, var(--theme-surface) 72%), color-mix(in srgb, ${c.solid} 14%, var(--theme-surface) 86%))`,
+                            border: `1.5px solid ${isSelected ? c.solid : `color-mix(in srgb, ${c.solid} 38%, var(--theme-border) 62%)`}`,
+                            boxShadow: isSelected
+                              ? `0 0 0 2px ${c.solid}, 0 8px 28px ${c.glow}`
+                              : `0 4px 16px ${c.glow}, inset 0 1px 0 color-mix(in srgb, white 14%, transparent)`,
+                            zIndex: isSelected ? 20 : 10,
+                          }}
+                          onMouseDown={(event) => {
+                            setSelectedCustomTileId(tile.id);
+                            startPresetInteraction(event, CUSTOM_LAYOUT_PREVIEW_ID, tile, previewTiles, "move", editorConfig);
+                          }}
+                        >
+                          {/* inner glow layer */}
+                          <div
+                            className="absolute inset-0 rounded-xl pointer-events-none"
+                            style={{ background: `radial-gradient(ellipse at 30% 30%, ${c.glow}, transparent 70%)` }}
+                          />
+                          {/* content */}
+                          <div className="relative h-full flex flex-col items-start justify-between p-2">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span style={{ color: c.icon, opacity: 0.9 }} className="[&>svg]:w-4 [&>svg]:h-4 shrink-0">
+                                {renderWidgetIcon(tile.type)}
+                              </span>
+                              <span className="text-[11px] font-semibold truncate" style={{ color: "var(--theme-text)" }}>
+                                {PREVIEW_TILE_LABELS[tile.type]}
+                              </span>
+                            </div>
+                            {/* size badge */}
+                            <span
+                              className="text-[9px] tabular-nums px-1.5 py-0.5 rounded-md"
+                              style={{ background: `color-mix(in srgb, ${c.solid} 20%, var(--theme-surface) 80%)`, color: c.icon }}
+                            >
+                              {tile.colSpan}×{tile.rowSpan}
+                            </span>
+                          </div>
+                          {/* resize handle */}
+                          <div
+                            className="absolute right-1.5 bottom-1.5 w-4 h-4 rounded-md cursor-nwse-resize flex items-center justify-center"
+                            style={{
+                              background: `color-mix(in srgb, ${c.solid} 30%, var(--theme-surface) 70%)`,
+                              border: `1px solid color-mix(in srgb, ${c.solid} 50%, transparent)`,
+                            }}
+                            onMouseDown={(event) => {
+                              event.stopPropagation();
+                              setSelectedCustomTileId(tile.id);
+                              startPresetInteraction(event, CUSTOM_LAYOUT_PREVIEW_ID, tile, previewTiles, "resize", editorConfig);
+                            }}
+                          >
+                            <svg viewBox="0 0 8 8" className="w-2.5 h-2.5" style={{ color: c.icon }}>
+                              <path d="M2 6L6 2M4 6L6 4M6 6L6 6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                            </svg>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* selected tile controls */}
+            <div
+              className="border-t px-4 py-3 flex items-center gap-3 transition-all duration-200"
               style={{
-                borderColor:
-                  answers.customDensity === option.id
-                    ? "color-mix(in srgb, var(--theme-accent) 55%, transparent)"
-                    : "color-mix(in srgb, var(--theme-border) 72%, transparent)",
-                background:
-                  answers.customDensity === option.id
-                    ? "color-mix(in srgb, var(--theme-accent) 12%, transparent)"
-                    : "color-mix(in srgb, var(--theme-surface) 70%, transparent)",
+                borderColor: "color-mix(in srgb, var(--theme-border) 40%, transparent)",
+                background: "color-mix(in srgb, var(--theme-surface) 45%, transparent)",
+                minHeight: "52px",
               }}
             >
-              <div className="font-medium text-sm theme-text">{option.title}</div>
-              <div className="text-xs theme-text-secondary mt-1">{option.desc}</div>
-            </button>
-          ))}
+              <div className="flex items-center gap-3 w-full flex-wrap">
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] theme-text-secondary mr-0.5">Width</span>
+                  <button
+                    type="button"
+                    disabled={customGridWidth <= 8}
+                    onClick={() => setCustomGridWidth((value) => Math.max(8, value - 1))}
+                    className="w-6 h-6 rounded-lg text-xs flex items-center justify-center transition-colors disabled:opacity-30"
+                    style={{ background: "color-mix(in srgb, var(--theme-border) 40%, transparent)", color: "var(--theme-text)" }}
+                  >
+                    −
+                  </button>
+                  <span className="text-[11px] font-mono theme-text w-4 text-center">{customGridWidth}</span>
+                  <button
+                    type="button"
+                    disabled={customGridWidth >= 12}
+                    onClick={() => setCustomGridWidth((value) => Math.min(12, value + 1))}
+                    className="w-6 h-6 rounded-lg text-xs flex items-center justify-center transition-colors disabled:opacity-30"
+                    style={{ background: "color-mix(in srgb, var(--theme-border) 40%, transparent)", color: "var(--theme-text)" }}
+                  >
+                    +
+                  </button>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] theme-text-secondary mr-0.5">Height</span>
+                  <button
+                    type="button"
+                    disabled={customGridHeight <= 5}
+                    onClick={() => setCustomGridHeight((value) => Math.max(5, value - 1))}
+                    className="w-6 h-6 rounded-lg text-xs flex items-center justify-center transition-colors disabled:opacity-30"
+                    style={{ background: "color-mix(in srgb, var(--theme-border) 40%, transparent)", color: "var(--theme-text)" }}
+                  >
+                    −
+                  </button>
+                  <span className="text-[11px] font-mono theme-text w-4 text-center">{customGridHeight}</span>
+                  <button
+                    type="button"
+                    disabled={customGridHeight >= 12}
+                    onClick={() => setCustomGridHeight((value) => Math.min(12, value + 1))}
+                    className="w-6 h-6 rounded-lg text-xs flex items-center justify-center transition-colors disabled:opacity-30"
+                    style={{ background: "color-mix(in srgb, var(--theme-border) 40%, transparent)", color: "var(--theme-text)" }}
+                  >
+                    +
+                  </button>
+                </div>
+                <p className="text-[11px] theme-text-secondary ml-auto">
+                  Drag tiles to move. Use corner handles to resize widgets.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <span className="text-[10px] theme-text-secondary opacity-60">
+              {previewTiles.length} widget{previewTiles.length !== 1 ? "s" : ""} on a {customGridWidth}×{totalRows} grid
+            </span>
+          </div>
         </div>
       );
     }
@@ -2082,11 +2410,6 @@ export default function OnboardingWizard({
           </div>
           <ThemeSwatchPanel
             theme={theme}
-            onApplyPreset={(preset) =>
-              applyThemeChoiceLive(
-                preset === "dark" ? "dark" : preset === "dev" ? "dev-matrix" : preset === "coffee" ? "coffee-espresso" : "light"
-              )
-            }
             onTokenChange={onThemeTokenChange}
             onToggleLock={onThemeLockToggle}
             onRandomize={() => applyThemeChoiceLive("random")}
@@ -3221,7 +3544,7 @@ export default function OnboardingWizard({
     );
   };
 
-  const nextLabel = isLastStep ? "Apply and open dashboard" : "Continue";
+  const nextLabel = isLastStep ? "Apply and open dashboard" : stepId === "welcome" ? "Start setup" : "Continue";
   const isWelcomeStep = stepId === "welcome";
 
   return createPortal(
@@ -3262,7 +3585,12 @@ export default function OnboardingWizard({
           {!isWelcomeStep ? (
             <div className="px-7 sm:px-9 pt-6 pb-2">
               <div className="text-[11px] uppercase tracking-wide theme-text-secondary mb-1">Setup wizard</div>
-              <h2 className="text-lg font-semibold theme-text">{STEP_TITLES[stepId]}</h2>
+              <div className="flex items-end justify-between gap-3">
+                <h2 className="text-lg font-semibold theme-text">{STEP_TITLES[stepId]}</h2>
+                <div className="text-[11px] theme-text-secondary">
+                  Step {stepIndex + 1} of {stepRail.length}
+                </div>
+              </div>
               {wizardError ? <p className="mt-2 text-xs text-red-500">{wizardError}</p> : null}
             </div>
           ) : null}

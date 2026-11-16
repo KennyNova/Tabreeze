@@ -67,6 +67,46 @@ const DEFAULT_THEME_AUTOMATION_SETTINGS: ThemeAutomationSettings = {
   nightStart: "19:00",
 };
 
+const THEME_COLOR_PROPERTIES: Array<{ name: string; initialValue: string }> = [
+  { name: "--theme-bg", initialValue: "#f2f2f7" },
+  { name: "--theme-surface", initialValue: "#ffffff" },
+  { name: "--theme-surface-hover", initialValue: "#f7f8fb" },
+  { name: "--theme-text", initialValue: "#1c1c1e" },
+  { name: "--theme-text-secondary", initialValue: "#66666b" },
+  { name: "--theme-accent", initialValue: "#007aff" },
+  { name: "--theme-accent-hover", initialValue: "#006ce1" },
+  { name: "--theme-border", initialValue: "#d9d9e1" },
+  { name: "--theme-scrollbar", initialValue: "#b8b8c4" },
+];
+
+let didRegisterThemeProperties = false;
+
+function ensureThemePropertyRegistration(): void {
+  if (didRegisterThemeProperties || typeof window === "undefined") return;
+  didRegisterThemeProperties = true;
+  const cssWithRegistration = CSS as typeof CSS & {
+    registerProperty?: (definition: {
+      name: string;
+      syntax: string;
+      inherits: boolean;
+      initialValue: string;
+    }) => void;
+  };
+  if (typeof cssWithRegistration.registerProperty !== "function") return;
+  for (const property of THEME_COLOR_PROPERTIES) {
+    try {
+      cssWithRegistration.registerProperty({
+        name: property.name,
+        syntax: "<color>",
+        inherits: true,
+        initialValue: property.initialValue,
+      });
+    } catch {
+      // Ignore duplicate registrations and unsupported property values.
+    }
+  }
+}
+
 function parseLegacyPreset(): "light" | "dark" {
   const stored = localStorage.getItem("dashboard-theme");
   if (stored === "dark") return "dark";
@@ -232,6 +272,7 @@ export function isDarkTheme(tokens: ThemeTokens): boolean {
 }
 
 export function applyTheme(tokens: ThemeTokens): void {
+  ensureThemePropertyRegistration();
   const root = document.documentElement;
   root.style.setProperty("--theme-bg", tokens.bg);
   root.style.setProperty("--theme-surface", tokens.surface);

@@ -24,7 +24,7 @@ This document is for the agent implementing the server endpoint on `navidmadani.
   "message": "Great extension, but weather widget freezes sometimes.",
   "rating": 4,
   "submittedAt": "2026-07-02T19:00:00.000Z",
-  "extensionVersion": "1.1.0",
+  "extensionVersion": "1.2.0",
   "appUrl": "chrome://newtab/",
   "userAgent": "Mozilla/5.0 ...",
   "diagnostics": {

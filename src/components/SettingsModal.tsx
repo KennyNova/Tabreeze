@@ -163,7 +163,6 @@ export default function SettingsModal({
         <div className="overflow-y-auto p-4 sm:p-6 space-y-5 flex-1 min-h-0">
           <ThemeSwatchPanel
             theme={theme}
-            onApplyPreset={onApplyThemePreset}
             onTokenChange={onThemeTokenChange}
             onToggleLock={onThemeLockToggle}
             onRandomize={() => onThemeChange(randomizeTheme(theme))}

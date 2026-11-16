@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useId } from "react";
 import { createPortal } from "react-dom";
 import {
   WeatherData,
@@ -364,25 +364,247 @@ interface WeatherWidgetProps {
   colSpan?: number;
 }
 
+function lerpColor(a: [number, number, number], b: [number, number, number], t: number): string {
+  const clamped = Math.min(Math.max(t, 0), 1);
+  const r = Math.round(a[0] + (b[0] - a[0]) * clamped);
+  const g = Math.round(a[1] + (b[1] - a[1]) * clamped);
+  const bCh = Math.round(a[2] + (b[2] - a[2]) * clamped);
+  return `rgb(${r},${g},${bCh})`;
+}
+
+function getTemperatureColor(temp: number, unit: "C" | "F"): string {
+  const tempF = unit === "F" ? temp : temp * 9 / 5 + 32;
+  const bands: Array<{ value: number; color: [number, number, number] }> = [
+    { value: 20, color: [79, 70, 229] },   // deep cold
+    { value: 32, color: [59, 130, 246] },  // freezing blue
+    { value: 50, color: [45, 212, 191] },  // cool teal
+    { value: 64, color: [74, 222, 128] },  // mild comfy green
+    { value: 72, color: [250, 204, 21] },  // warm yellow
+    { value: 82, color: [251, 146, 60] },  // hot orange
+    { value: 92, color: [239, 68, 68] },   // very hot red
+    { value: 104, color: [190, 24, 93] },  // extreme heat
+  ];
+
+  if (tempF <= bands[0].value) return lerpColor(bands[0].color, bands[0].color, 0);
+  if (tempF >= bands[bands.length - 1].value) {
+    const last = bands[bands.length - 1].color;
+    return lerpColor(last, last, 0);
+  }
+
+  for (let i = 0; i < bands.length - 1; i++) {
+    const start = bands[i];
+    const end = bands[i + 1];
+    if (tempF >= start.value && tempF <= end.value) {
+      const t = (tempF - start.value) / (end.value - start.value);
+      return lerpColor(start.color, end.color, t);
+    }
+  }
+
+  return "rgb(148, 163, 184)";
+}
+
+function buildSmoothPath(points: Array<{ x: number; y: number }>): string {
+  if (points.length === 0) return "";
+  if (points.length === 1) return `M${points[0].x},${points[0].y}`;
+  if (points.length === 2) return `M${points[0].x},${points[0].y} L${points[1].x},${points[1].y}`;
+
+  let path = `M${points[0].x},${points[0].y}`;
+  for (let i = 0; i < points.length - 2; i++) {
+    const cp = points[i + 1];
+    const end = {
+      x: (cp.x + points[i + 2].x) / 2,
+      y: (cp.y + points[i + 2].y) / 2,
+    };
+    path += ` Q${cp.x},${cp.y} ${end.x},${end.y}`;
+  }
+  const penultimate = points[points.length - 2];
+  const last = points[points.length - 1];
+  path += ` Q${penultimate.x},${penultimate.y} ${last.x},${last.y}`;
+  return path;
+}
+
+function ForecastTemperatureCurve({
+  days,
+  globalMin,
+  globalMax,
+  unit,
+  orientation,
+}: {
+  days: Array<{ tempMax: number; tempMin: number }>;
+  globalMin: number;
+  globalMax: number;
+  unit: "C" | "F";
+  orientation: "horizontal" | "vertical";
+}) {
+  const gradientId = useId();
+  const pad = 8;
+  const axisRange = Math.max(globalMax - globalMin, 1);
+
+  if (days.length < 2) return null;
+
+  const points = days.map((day, i) => {
+    const avgTemp = (day.tempMax + day.tempMin) / 2;
+    const tempPct = (avgTemp - globalMin) / axisRange;
+    const dayPct = i / (days.length - 1);
+
+    if (orientation === "horizontal") {
+      return {
+        x: pad + dayPct * (100 - pad * 2),
+        y: pad + (1 - tempPct) * (100 - pad * 2),
+      };
+    }
+
+    return {
+      x: pad + tempPct * (100 - pad * 2),
+      y: pad + dayPct * (100 - pad * 2),
+    };
+  });
+
+  const linePath = buildSmoothPath(points);
+  const stops = days.map((day, i) => {
+    const avgTemp = (day.tempMax + day.tempMin) / 2;
+    return {
+      offset: `${((i / (days.length - 1)) * 100).toFixed(1)}%`,
+      color: getTemperatureColor(avgTemp, unit),
+    };
+  });
+
+  return (
+    <>
+      <div className="absolute inset-0 pointer-events-none z-[2]">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full">
+          <defs>
+            <linearGradient
+              id={gradientId}
+              x1={orientation === "horizontal" ? "0%" : "0%"}
+              x2={orientation === "horizontal" ? "100%" : "0%"}
+              y1={orientation === "horizontal" ? "0%" : "0%"}
+              y2={orientation === "horizontal" ? "0%" : "100%"}
+            >
+              {stops.map((stop, i) => (
+                <stop key={i} offset={stop.offset} stopColor={stop.color} />
+              ))}
+            </linearGradient>
+          </defs>
+          <path
+            d={linePath}
+            fill="none"
+            stroke={`url(#${gradientId})`}
+            strokeWidth="1.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+      </div>
+      {orientation === "horizontal" ? (
+        <>
+          <span className="absolute left-0 top-0 text-[9px] tabular-nums text-gray-600/70 dark:text-white/50 pointer-events-none z-[3]">
+            {globalMax}°
+          </span>
+          <span className="absolute left-0 bottom-0 text-[9px] tabular-nums text-gray-500/60 dark:text-white/40 pointer-events-none z-[3]">
+            {globalMin}°
+          </span>
+          <span className="absolute right-0 top-0 text-[9px] tabular-nums text-gray-600/70 dark:text-white/50 pointer-events-none z-[3]">
+            {globalMax}°
+          </span>
+          <span className="absolute right-0 bottom-0 text-[9px] tabular-nums text-gray-500/60 dark:text-white/40 pointer-events-none z-[3]">
+            {globalMin}°
+          </span>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+function HourlyTempCurveBar({
+  hourly,
+  globalMin,
+  globalMax,
+  unit,
+  delay,
+}: {
+  hourly: HourlyForecast[];
+  globalMin: number;
+  globalMax: number;
+  unit: "C" | "F";
+  delay: number;
+}) {
+  const gradientId = useId();
+  const axisRange = Math.max(globalMax - globalMin, 1);
+  // Sample every 2 hours for a smooth but not over-plotted curve
+  const samples = hourly.filter((_, i) => i % 2 === 0);
+  if (samples.length < 2) return (
+    <div className="flex-1 h-[3px] rounded-full bg-black/[0.08] dark:bg-white/[0.12] mx-0.5" />
+  );
+
+  const W = 100;
+  const H = 20;
+  const padX = 0;
+  const padY = 3;
+  const usableH = H - padY * 2;
+
+  const points = samples.map((h, i) => ({
+    x: padX + (i / (samples.length - 1)) * (W - padX * 2),
+    y: padY + usableH * (1 - (h.temperature - globalMin) / axisRange),
+  }));
+
+  const linePath = buildSmoothPath(points);
+  const stops = samples.map((sample, i) => {
+    const offset = `${((i / (samples.length - 1)) * 100).toFixed(1)}%`;
+    return { offset, color: getTemperatureColor(sample.temperature, unit) };
+  });
+
+  return (
+    <div className="flex-1 relative mx-0.5 overflow-visible" style={{ height: 20 }}>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="none"
+        className="absolute inset-0 w-full h-full temp-line-graph"
+        style={{ animationDelay: `${delay + 200}ms` }}
+      >
+        <defs>
+          <linearGradient id={gradientId} x1="0%" x2="100%" y1="0%" y2="0%">
+            {stops.map((stop, i) => (
+              <stop key={i} offset={stop.offset} stopColor={stop.color} />
+            ))}
+          </linearGradient>
+        </defs>
+        <path
+          d={linePath}
+          fill="none"
+          stroke={`url(#${gradientId})`}
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+    </div>
+  );
+}
+
 function ForecastCard({
   day,
   index,
   globalMin,
-  tempRange,
+  globalMax,
+  unit,
   compact,
   delay,
   onClick,
 }: {
-  day: { date: string; weatherCode: number; tempMax: number; tempMin: number; precipitationProbability: number };
+  day: { date: string; weatherCode: number; tempMax: number; tempMin: number; precipitationProbability: number; hourly: HourlyForecast[] };
   index: number;
   globalMin: number;
-  tempRange: number;
+  globalMax: number;
+  unit: "C" | "F";
   compact?: boolean;
   delay: number;
   onClick?: (e: React.MouseEvent) => void;
 }) {
-  const minPct = ((day.tempMin - globalMin) / tempRange) * 100;
-  const maxPct = ((day.tempMax - globalMin) / tempRange) * 100;
+  const lowColor = getTemperatureColor(day.tempMin, unit);
+  const highColor = getTemperatureColor(day.tempMax, unit);
 
   return (
     <div
@@ -401,18 +623,13 @@ function ForecastCard({
       <span className="w-6 text-[10px] text-blue-500/75 dark:text-blue-300/80 text-right shrink-0">
         {day.precipitationProbability > 0 ? `${day.precipitationProbability}%` : ""}
       </span>
-      <div className="flex-1 relative h-[3px] rounded-full bg-black/[0.08] dark:bg-white/[0.12] mx-0.5">
-        <div
-          className="absolute h-full rounded-full forecast-temp-bar"
-          style={{
-            left: `${minPct}%`,
-            width: `${maxPct - minPct}%`,
-            animationDelay: `${delay + 200}ms`,
-          }}
-        />
-      </div>
-      <span className="w-6 text-[11px] text-right text-gray-500/65 dark:text-white/50 shrink-0 tabular-nums">{day.tempMin}°</span>
-      <span className="w-6 text-[11px] text-right text-gray-700/80 dark:text-white/75 shrink-0 tabular-nums font-medium">{day.tempMax}°</span>
+      <span className="w-8 text-[13px] text-right tabular-nums font-semibold shrink-0" style={{ color: lowColor }}>
+        {day.tempMin}°
+      </span>
+      <HourlyTempCurveBar hourly={day.hourly} globalMin={globalMin} globalMax={globalMax} unit={unit} delay={delay} />
+      <span className="w-8 text-[13px] text-right tabular-nums font-semibold shrink-0" style={{ color: highColor }}>
+        {day.tempMax}°
+      </span>
     </div>
   );
 }
@@ -449,10 +666,6 @@ function ForecastColumn({
       >
         {day.precipitationProbability > 0 ? `${day.precipitationProbability}%` : "0%"}
       </span>
-      <div className="flex flex-col items-center">
-        <span className="text-[11px] font-medium text-gray-700/80 dark:text-white/75 tabular-nums">{day.tempMax}°</span>
-        <span className="text-[10px] text-gray-500/55 dark:text-white/45 tabular-nums">{day.tempMin}°</span>
-      </div>
     </div>
   );
 }
@@ -805,18 +1018,23 @@ export default function WeatherWidget({ tileId, rowSpan = 1, colSpan = 4 }: Weat
   };
 
   const renderForecastRows = (days: typeof visibleForecast, compact = false) => (
-    <div className="space-y-1">
-      {days.map((day, i) => (
-        <ForecastCard key={day.date} day={day} index={i} globalMin={globalMin} tempRange={tempRange} compact={compact} delay={i * 60} onClick={() => handleDayClick(day, i)} />
-      ))}
+    <div className="relative">
+      <div className="space-y-1 relative z-[4]">
+        {days.map((day, i) => (
+          <ForecastCard key={day.date} day={day} index={i} globalMin={globalMin} globalMax={globalMax} unit={weather?.unit ?? "C"} compact={compact} delay={i * 60} onClick={() => handleDayClick(day, i)} />
+        ))}
+      </div>
     </div>
   );
 
   const renderForecastColumns = (days: typeof visibleForecast) => (
-    <div className="flex gap-1.5">
-      {days.map((day, i) => (
-        <ForecastColumn key={day.date} day={day} index={i} delay={i * 60} onClick={() => handleDayClick(day, i)} />
-      ))}
+    <div className="relative">
+      <ForecastTemperatureCurve days={days} globalMin={globalMin} globalMax={globalMax} unit={weather?.unit ?? "C"} orientation="horizontal" />
+      <div className="flex gap-1.5 relative z-[4]">
+        {days.map((day, i) => (
+          <ForecastColumn key={day.date} day={day} index={i} delay={i * 60} onClick={() => handleDayClick(day, i)} />
+        ))}
+      </div>
     </div>
   );
 
@@ -834,18 +1052,23 @@ export default function WeatherWidget({ tileId, rowSpan = 1, colSpan = 4 }: Weat
           )}
           {!isTiny && visibleForecast.length > 0 && (
             <div className="col-span-7 min-w-0 flex gap-1 items-stretch relative">
+              <ForecastTemperatureCurve days={visibleForecast} globalMin={globalMin} globalMax={globalMax} unit={weather?.unit ?? "C"} orientation="horizontal" />
               {visibleForecast.map((day, i) => (
                 <div
                   key={day.date}
-                  className="forecast-day-card flex flex-col items-center justify-between rounded-lg border border-black/[0.06] dark:border-white/[0.12] bg-black/[0.05] dark:bg-white/[0.08] px-1 py-2 min-w-0 flex-1 h-full min-h-[54px] cursor-pointer hover:bg-black/[0.09] dark:hover:bg-white/[0.14] active:scale-[0.97] transition-all"
+                  className="forecast-day-card flex flex-col items-center justify-between rounded-lg border border-black/[0.06] dark:border-white/[0.12] bg-black/[0.05] dark:bg-white/[0.08] px-1 py-2 min-w-0 flex-1 h-full min-h-[54px] cursor-pointer hover:bg-black/[0.09] dark:hover:bg-white/[0.14] active:scale-[0.97] transition-all relative z-[4]"
                   style={{ animationDelay: `${i * 60}ms` }}
                   onClick={() => handleDayClick(day, i)}
                 >
-                  <span className="text-[9px] text-gray-500/60 dark:text-white/45 leading-none mt-[1px]">{formatDay(day.date, i)}</span>
+                  <div className="flex flex-col items-center leading-none mt-[1px]">
+                    <span className="text-[9px] text-gray-500/60 dark:text-white/45">{formatDay(day.date, i)}</span>
+                    <span className="text-[8px] tabular-nums text-gray-600/70 dark:text-white/50 mt-0.5">
+                      {day.tempMin}° / {day.tempMax}°
+                    </span>
+                  </div>
                   <span className="text-xs weather-forecast-icon leading-none mt-0.5" style={{ animationDelay: `${i * 60 + 100}ms` }}>
                     {getWeatherIcon(day.weatherCode, true)}
                   </span>
-                  <span className="text-[9px] tabular-nums text-gray-600/70 dark:text-white/55 leading-none mb-[1px]">{day.tempMax}°</span>
                 </div>
               ))}
               {selectedDay && (

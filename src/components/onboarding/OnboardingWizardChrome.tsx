@@ -53,7 +53,7 @@ export default function OnboardingWizardChrome({
         </button>
         {showJumpToFinish && onJumpToFinish ? (
           <button type="button" className="btn-ghost text-sm" onClick={onJumpToFinish} disabled={!canGoNext}>
-            Jump to review & finish
+            Skip to review
           </button>
         ) : null}
         <button

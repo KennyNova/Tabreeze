@@ -1,19 +1,13 @@
-import { useMemo } from "react";
 import {
-  THEME_PRESETS,
-  THEME_SETTINGS_PRESET_ORDER,
   THEME_TOKEN_LABELS,
   THEME_TOKEN_ORDER,
   normalizeHexColor,
-  toSettingsPresetId,
-  type ThemeSettingsSelectablePreset,
   type ThemeTokens,
 } from "../settings/themeTokens";
 import type { ThemeState } from "../settings/themeStore";
 
 interface ThemeSwatchPanelProps {
   theme: ThemeState;
-  onApplyPreset: (preset: ThemeSettingsSelectablePreset) => void;
   onTokenChange: (key: keyof ThemeTokens, value: string) => void;
   onToggleLock: (key: keyof ThemeTokens) => void;
   onRandomize: () => void;
@@ -44,25 +38,10 @@ function swatchTextColor(hex: string): string {
 
 export default function ThemeSwatchPanel({
   theme,
-  onApplyPreset,
   onTokenChange,
   onToggleLock,
   onRandomize,
 }: ThemeSwatchPanelProps) {
-  const showCustomPreset = theme.preset === "custom";
-  const presetButtons = useMemo(() => {
-    const base: Array<
-      { id: ThemeSettingsSelectablePreset; label: string } | { id: "custom"; label: string }
-    > = THEME_SETTINGS_PRESET_ORDER.map((id) => {
-      const meta = THEME_PRESETS.find((p) => p.id === id)!;
-      return { id, label: meta.label };
-    });
-    if (showCustomPreset) {
-      base.push({ id: "custom", label: "Custom" });
-    }
-    return base;
-  }, [showCustomPreset]);
-
   return (
     <section className="glass p-4 rounded-2xl">
       <div className="flex items-center justify-between gap-3 mb-3">
@@ -73,38 +52,6 @@ export default function ThemeSwatchPanel({
           </svg>
           Randomize
         </button>
-      </div>
-
-      <div className="flex flex-wrap gap-2 mb-4">
-        {presetButtons.map((preset) => {
-          const active =
-            preset.id === "custom"
-              ? theme.preset === "custom"
-              : toSettingsPresetId(theme.preset) === preset.id;
-          return (
-            <button
-              key={preset.id}
-              type="button"
-              onClick={() => {
-                if (preset.id === "custom") return;
-                onApplyPreset(preset.id);
-              }}
-              disabled={preset.id === "custom"}
-              className="px-3 py-1.5 rounded-xl text-xs transition-all disabled:cursor-default"
-              style={{
-                background: active
-                  ? "color-mix(in srgb, var(--theme-accent) 25%, transparent)"
-                  : "color-mix(in srgb, var(--theme-surface-hover) 78%, transparent)",
-                color: active ? "var(--theme-accent)" : "var(--theme-text-secondary)",
-                border: active
-                  ? "1px solid color-mix(in srgb, var(--theme-accent) 40%, transparent)"
-                  : "1px solid color-mix(in srgb, var(--theme-border) 65%, transparent)",
-              }}
-            >
-              {preset.label}
-            </button>
-          );
-        })}
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-2">
@@ -119,7 +66,7 @@ export default function ThemeSwatchPanel({
               style={{ borderColor: "color-mix(in srgb, var(--theme-border) 70%, transparent)" }}
             >
               <label
-                className="group relative h-20 flex items-end p-2 cursor-pointer"
+                className="group relative h-20 flex items-end p-2 cursor-pointer transition-colors duration-500"
                 style={{ background: value, color: textColor }}
                 title={`Pick ${THEME_TOKEN_LABELS[key]}`}
               >
