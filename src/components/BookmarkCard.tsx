@@ -1,4 +1,11 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useEffect } from "react";
+import {
+  getCachedFavicon,
+  getFaviconServiceUrls,
+  refreshFavicon,
+  shouldRefreshFavicon,
+  subscribeFavicon,
+} from "../services/favicons";
 
 interface BookmarkCardProps {
   id?: string;
@@ -13,32 +20,44 @@ interface BookmarkCardProps {
   showActions?: boolean;
 }
 
-/** Ordered candidates; Google often works, gstatic/ddg cover edge cases and CDNs. */
-function getFaviconCandidates(url: string): string[] {
-  try {
-    const u = new URL(url);
-    const protocol = u.protocol.toLowerCase();
-    if (
-      protocol === "chrome:" ||
-      protocol === "chrome-extension:" ||
-      protocol === "file:" ||
-      protocol === "about:" ||
-      protocol === "javascript:" ||
-      protocol === "data:"
-    ) {
-      return [];
+/**
+ * Cached favicon for a bookmark. Missing icons are re-resolved on every mount until one
+ * is found; found icons are refreshed periodically. If the sources can't be fetched at all
+ * (e.g. dev server without host permissions), falls back to chaining <img> through the services.
+ */
+function useFavicon(url: string): { src: string | null; onError: () => void } {
+  const [cachedSrc, setCachedSrc] = useState<string | null>(() => getCachedFavicon(url)?.src ?? null);
+  const [fallbackUrls, setFallbackUrls] = useState<string[]>([]);
+  const [fallbackIndex, setFallbackIndex] = useState(0);
+
+  useEffect(() => {
+    const entry = getCachedFavicon(url);
+    setCachedSrc(entry?.src ?? null);
+    setFallbackUrls([]);
+    setFallbackIndex(0);
+
+    let cancelled = false;
+    const unsubscribe = subscribeFavicon(url, (src) => {
+      if (!cancelled) setCachedSrc(src);
+    });
+    if (shouldRefreshFavicon(entry)) {
+      refreshFavicon(url).then((result) => {
+        if (!cancelled && result.status === "unavailable" && !entry?.src) {
+          setFallbackUrls(getFaviconServiceUrls(url));
+        }
+      });
     }
-    const host = u.hostname;
-    if (!host) return [];
-    const encodedPage = encodeURIComponent(url);
-    return [
-      `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`,
-      `https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&url=${encodedPage}&size=64`,
-      `https://icons.duckduckgo.com/ip3/${host}.ico`,
-    ];
-  } catch {
-    return [];
-  }
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [url]);
+
+  if (cachedSrc) return { src: cachedSrc, onError: () => setCachedSrc(null) };
+  return {
+    src: fallbackIndex < fallbackUrls.length ? fallbackUrls[fallbackIndex] : null,
+    onError: () => setFallbackIndex((i) => i + 1),
+  };
 }
 
 function getInitialLetter(title: string, url: string): string {
@@ -75,17 +94,7 @@ export default function BookmarkCard({
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(title);
   const [editUrl, setEditUrl] = useState(url);
-  const faviconCandidates = useMemo(() => getFaviconCandidates(url), [url]);
-  const [faviconFailIndex, setFaviconFailIndex] = useState(0);
-
-  useEffect(() => {
-    setFaviconFailIndex(0);
-  }, [url]);
-
-  const faviconSrc =
-    faviconCandidates.length > 0 && faviconFailIndex < faviconCandidates.length
-      ? faviconCandidates[faviconFailIndex]
-      : null;
+  const { src: faviconSrc, onError: onFaviconError } = useFavicon(url);
 
   const handleSave = () => {
     if (id && onEdit && editTitle.trim() && editUrl.trim()) {
@@ -147,7 +156,7 @@ export default function BookmarkCard({
             alt=""
             draggable={false}
             className="w-10 h-10 rounded-xl object-contain bg-white/5"
-            onError={() => setFaviconFailIndex((i) => i + 1)}
+            onError={onFaviconError}
           />
         ) : (
           <div
